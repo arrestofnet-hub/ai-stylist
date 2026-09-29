@@ -13,6 +13,7 @@ from app.schemas import (
     PhotoOut,
     ProfileCreate,
     ProfileOut,
+    ProfileReadinessOut,
     ProfileUpdate,
     ReferencePhotoRole,
     StylePreferences,
@@ -136,6 +137,52 @@ def get_balance(profile_id: str) -> BalanceOut:
         free_tries=free_tries,
         paid_credits=paid_credits,
         total_available=free_tries + paid_credits,
+    )
+
+
+@router.get("/{profile_id}/readiness", response_model=ProfileReadinessOut)
+def get_profile_readiness(profile_id: str) -> ProfileReadinessOut:
+    _profile_or_404(profile_id)
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT role
+            FROM reference_photos
+            WHERE profile_id = ?
+            ORDER BY created_at ASC
+            """,
+            (profile_id,),
+        ).fetchall()
+
+    roles = [ReferencePhotoRole(row["role"]) for row in rows]
+    role_set = set(roles)
+    has_face = (
+        ReferencePhotoRole.front in role_set
+        or ReferencePhotoRole.three_quarter in role_set
+    )
+
+    recommended = [
+        ReferencePhotoRole.front,
+        ReferencePhotoRole.three_quarter,
+        ReferencePhotoRole.full_body,
+    ]
+    missing = [role for role in recommended if role not in role_set]
+
+    return ProfileReadinessOut(
+        profile_id=profile_id,
+        photo_count=len(rows),
+        roles_present=roles,
+        ready_for_try_on=bool(rows),
+        outfit_ready=has_face and ReferencePhotoRole.full_body in role_set,
+        haircut_ready=(
+            ReferencePhotoRole.front in role_set
+            and (
+                ReferencePhotoRole.three_quarter in role_set
+                or ReferencePhotoRole.side in role_set
+            )
+        ),
+        missing_recommended_roles=missing,
     )
 
 
