@@ -47,11 +47,20 @@ class BalanceOut(BaseModel):
     total_available: int
 
 
+class ReferencePhotoRole(str, Enum):
+    front = "front"
+    three_quarter = "three_quarter"
+    side = "side"
+    full_body = "full_body"
+    other = "other"
+
+
 class PhotoOut(BaseModel):
     id: str
     profile_id: str
     original_name: str | None
     mime_type: str
+    role: ReferencePhotoRole = ReferencePhotoRole.other
     created_at: str
 
 
