@@ -17,6 +17,7 @@ from app.routes.profiles import (
     create_profile_record,
     get_balance,
     get_profile,
+    get_profile_readiness,
     update_profile,
 )
 from app.schemas import (
@@ -357,6 +358,19 @@ def get_style_profile(profile_id: str) -> dict:
     """Get a saved AI Stylist profile and its current reference-photo count."""
     _ensure_profile_access(profile_id)
     return get_profile(profile_id).model_dump(mode="json")
+
+
+@server.tool(
+    title="Check reference readiness",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
+def get_style_readiness(profile_id: str) -> dict:
+    """Check whether saved reference photos are sufficient for outfit and haircut try-ons."""
+    _ensure_profile_access(profile_id)
+    return get_profile_readiness(profile_id).model_dump(mode="json")
 
 
 @server.tool(
