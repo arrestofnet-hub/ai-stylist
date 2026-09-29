@@ -73,6 +73,7 @@ class GenerationRequest(BaseModel):
     tier: GenerationTier = GenerationTier.preview
     base_generation_id: str | None = None
     reference_photo_ids: list[str] | None = None
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class GenerationOut(BaseModel):
@@ -111,3 +112,22 @@ class CreditTransactionOut(BaseModel):
     reason: str | None = None
     external_reference: str | None = None
     created_at: str
+
+
+class AdminStatsOut(BaseModel):
+    profiles: int
+    reference_photos: int
+    generations_total: int
+    generations_completed: int
+    generations_failed: int
+    generations_processing: int
+    free_tries_remaining: int
+    paid_credits_remaining: int
+    paid_credits_granted: int
+    paid_credits_charged: int
+    paid_credits_refunded: int
+
+
+class MaintenanceOut(BaseModel):
+    stale_generations_recovered: int = 0
+    generated_files_deleted: int = 0
