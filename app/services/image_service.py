@@ -1,6 +1,8 @@
 import base64
 import json
+import sqlite3
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -123,7 +125,40 @@ def _model_and_quality(tier: GenerationTier) -> tuple[str, str]:
     return settings.final_image_model, settings.final_image_quality
 
 
-def _reserve_credits(profile_id: str, cost: int) -> tuple[int, int]:
+def _insert_credit_transaction(
+    conn: sqlite3.Connection,
+    *,
+    profile_id: str,
+    amount: int,
+    kind: str,
+    external_reference: str,
+    reason: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO credit_transactions (
+            id, profile_id, amount, kind, reason,
+            external_reference, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(uuid4()),
+            profile_id,
+            amount,
+            kind,
+            reason,
+            external_reference,
+            utc_now(),
+        ),
+    )
+
+
+def _reserve_credits(
+    profile_id: str,
+    cost: int,
+    generation_id: str,
+) -> tuple[int, int]:
     with connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
@@ -155,10 +190,29 @@ def _reserve_credits(profile_id: str, cost: int) -> tuple[int, int]:
             (free_used, paid_used, utc_now(), profile_id),
         )
 
+        if paid_used:
+            _insert_credit_transaction(
+                conn,
+                profile_id=profile_id,
+                amount=-paid_used,
+                kind="generation_charge",
+                external_reference=generation_id,
+                reason="Image generation credit reservation",
+            )
+
     return free_used, paid_used
 
 
-def _refund_credits(profile_id: str, free_used: int, paid_used: int) -> None:
+def _refund_credits(
+    profile_id: str,
+    free_used: int,
+    paid_used: int,
+    generation_id: str,
+    reason: str,
+) -> None:
+    if not free_used and not paid_used:
+        return
+
     with connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
@@ -171,6 +225,16 @@ def _refund_credits(profile_id: str, free_used: int, paid_used: int) -> None:
             """,
             (free_used, paid_used, utc_now(), profile_id),
         )
+
+        if paid_used:
+            _insert_credit_transaction(
+                conn,
+                profile_id=profile_id,
+                amount=paid_used,
+                kind="generation_refund",
+                external_reference=generation_id,
+                reason=reason,
+            )
 
 
 def _preferences_text(profile: dict) -> str:
@@ -332,6 +396,25 @@ def _generation_row(generation_id: str, profile_id: str) -> dict:
     return dict(row)
 
 
+def _idempotent_generation(
+    profile_id: str,
+    idempotency_key: str | None,
+) -> dict | None:
+    if not idempotency_key:
+        return None
+
+    with connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM generations
+            WHERE profile_id = ? AND idempotency_key = ?
+            """,
+            (profile_id, idempotency_key),
+        ).fetchone()
+
+    return dict(row) if row is not None else None
+
+
 def generate_style_image(
     profile_id: str,
     mode: GenerationMode,
@@ -339,7 +422,12 @@ def generate_style_image(
     tier: GenerationTier = GenerationTier.preview,
     base_generation_id: str | None = None,
     reference_photo_ids: list[str] | None = None,
+    idempotency_key: str | None = None,
 ) -> dict:
+    existing = _idempotent_generation(profile_id, idempotency_key)
+    if existing is not None:
+        return existing
+
     profile = _profile(profile_id)
 
     if mode == GenerationMode.change_item and not base_generation_id:
@@ -368,10 +456,14 @@ def generate_style_image(
     prompt = build_prompt(profile, mode, instruction)
     model, quality = _model_and_quality(tier)
     cost = _credit_cost(tier)
-    free_used, paid_used = _reserve_credits(profile_id, cost)
-
     generation_id = str(uuid4())
     created_at = utc_now()
+
+    free_used, paid_used = _reserve_credits(
+        profile_id,
+        cost,
+        generation_id,
+    )
 
     try:
         with connection() as conn:
@@ -379,10 +471,10 @@ def generate_style_image(
                 """
                 INSERT INTO generations (
                     id, profile_id, mode, tier, instruction, prompt, model,
-                    quality, size, status, base_generation_id, cost_credits,
-                    charged_free, charged_paid, created_at
+                    quality, size, status, base_generation_id, idempotency_key,
+                    cost_credits, charged_free, charged_paid, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     generation_id,
@@ -395,14 +487,33 @@ def generate_style_image(
                     quality,
                     settings.image_size,
                     base_generation_id,
+                    idempotency_key,
                     cost,
                     free_used,
                     paid_used,
                     created_at,
                 ),
             )
+    except sqlite3.IntegrityError:
+        _refund_credits(
+            profile_id,
+            free_used,
+            paid_used,
+            generation_id,
+            "Duplicate idempotent request",
+        )
+        existing = _idempotent_generation(profile_id, idempotency_key)
+        if existing is not None:
+            return existing
+        raise
     except Exception:
-        _refund_credits(profile_id, free_used, paid_used)
+        _refund_credits(
+            profile_id,
+            free_used,
+            paid_used,
+            generation_id,
+            "Generation record could not be created",
+        )
         raise
 
     try:
@@ -439,7 +550,13 @@ def generate_style_image(
                 ),
             )
     except Exception as exc:
-        _refund_credits(profile_id, free_used, paid_used)
+        _refund_credits(
+            profile_id,
+            free_used,
+            paid_used,
+            generation_id,
+            "Image generation failed",
+        )
         with connection() as conn:
             conn.execute(
                 """
@@ -477,3 +594,138 @@ def list_generations(profile_id: str, limit: int = 20) -> list[dict]:
             (profile_id, safe_limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def delete_generation(profile_id: str, generation_id: str) -> None:
+    row = _generation_row(generation_id, profile_id)
+    if row["status"] == "processing":
+        raise InvalidGenerationRequest(
+            "A processing generation cannot be deleted"
+        )
+
+    output_path = Path(row["output_path"]) if row.get("output_path") else None
+    with connection() as conn:
+        conn.execute(
+            "DELETE FROM generations WHERE id = ? AND profile_id = ?",
+            (generation_id, profile_id),
+        )
+
+    if output_path:
+        output_path.unlink(missing_ok=True)
+
+
+def recover_stale_generations() -> int:
+    cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(minutes=max(1, settings.stale_generation_minutes))
+    ).isoformat()
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, profile_id, charged_free, charged_paid
+            FROM generations
+            WHERE status = 'processing' AND created_at < ?
+            """,
+            (cutoff,),
+        ).fetchall()
+
+    recovered = 0
+
+    for row in rows:
+        generation_id = row["id"]
+        profile_id = row["profile_id"]
+        free_used = int(row["charged_free"])
+        paid_used = int(row["charged_paid"])
+
+        with connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT status FROM generations WHERE id = ?",
+                (generation_id,),
+            ).fetchone()
+
+            if current is None or current["status"] != "processing":
+                continue
+
+            conn.execute(
+                """
+                UPDATE profiles
+                SET free_tries = free_tries + ?,
+                    paid_credits = paid_credits + ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (free_used, paid_used, utc_now(), profile_id),
+            )
+
+            if paid_used:
+                _insert_credit_transaction(
+                    conn,
+                    profile_id=profile_id,
+                    amount=paid_used,
+                    kind="generation_refund",
+                    external_reference=generation_id,
+                    reason="Recovered stale processing generation",
+                )
+
+            conn.execute(
+                """
+                UPDATE generations
+                SET status = 'failed',
+                    error_message = ?,
+                    completed_at = ?
+                WHERE id = ?
+                """,
+                (
+                    "Generation was interrupted and credits were automatically refunded",
+                    utc_now(),
+                    generation_id,
+                ),
+            )
+            recovered += 1
+
+    return recovered
+
+
+def purge_expired_generated_files() -> int:
+    retention_days = max(1, settings.generated_retention_days)
+    cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(days=retention_days)
+    ).isoformat()
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, output_path
+            FROM generations
+            WHERE status = 'completed'
+              AND completed_at IS NOT NULL
+              AND completed_at < ?
+              AND output_path IS NOT NULL
+            """,
+            (cutoff,),
+        ).fetchall()
+
+    deleted = 0
+    for row in rows:
+        path = Path(row["output_path"])
+        path.unlink(missing_ok=True)
+        with connection() as conn:
+            conn.execute(
+                """
+                UPDATE generations
+                SET status = 'expired',
+                    output_path = NULL,
+                    error_message = ?
+                WHERE id = ? AND status = 'completed'
+                """,
+                (
+                    f"Generated image expired after {retention_days} days",
+                    row["id"],
+                ),
+            )
+        deleted += 1
+
+    return deleted
