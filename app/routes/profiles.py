@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -58,7 +59,7 @@ def create_profile(payload: ProfileCreate) -> ProfileOut:
                 style_goal, preferences_json, free_tries, paid_credits,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 3, 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
             """,
             (
                 profile_id,
@@ -69,6 +70,7 @@ def create_profile(payload: ProfileCreate) -> ProfileOut:
                 payload.weight_kg,
                 payload.style_goal,
                 json.dumps(payload.preferences.model_dump(), ensure_ascii=False),
+                settings.free_tries_on_signup,
                 now,
                 now,
             ),
@@ -257,4 +259,16 @@ def delete_reference_photo(profile_id: str, photo_id: str) -> Response:
         )
 
     Path(row["file_path"]).unlink(missing_ok=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_profile(profile_id: str) -> Response:
+    _profile_or_404(profile_id)
+
+    with connection() as conn:
+        conn.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+
+    shutil.rmtree(Path(settings.upload_dir) / profile_id, ignore_errors=True)
+    shutil.rmtree(Path(settings.generated_dir) / profile_id, ignore_errors=True)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
