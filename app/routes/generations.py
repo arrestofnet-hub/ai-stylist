@@ -47,6 +47,7 @@ def _to_output(row: dict) -> GenerationOut:
         error_message=row.get("error_message"),
         created_at=row["created_at"],
         completed_at=row.get("completed_at"),
+        duration_ms=row.get("duration_ms"),
     )
 
 
