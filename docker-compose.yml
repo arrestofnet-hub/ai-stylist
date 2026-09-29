@@ -1,5 +1,5 @@
 services:
-  api:
+  app:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8010
     env_file:
@@ -16,22 +16,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    restart: unless-stopped
-
-  mcp:
-    build: .
-    command: python mcp_server.py
-    env_file:
-      - .env
-    ports:
-      - "127.0.0.1:8011:8011"
-    volumes:
-      - stylist-data:/app/data
-      - stylist-uploads:/app/uploads
-      - stylist-generated:/app/generated
-    depends_on:
-      api:
-        condition: service_healthy
     restart: unless-stopped
 
 volumes:
