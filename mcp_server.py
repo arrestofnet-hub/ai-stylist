@@ -17,6 +17,7 @@ from app.schemas import (
     ProfileUpdate,
     StylePreferences,
 )
+from app.services.image_utils import InvalidImageError, sanitize_image_bytes
 from app.services.image_service import (
     StylistError,
     generate_style_image,
@@ -28,7 +29,7 @@ server = MCPServer(
     "AI Stylist",
     title="AI Stylist",
     description="Personal virtual stylist for clothing and haircut try-ons.",
-    version="0.4.0",
+    version="0.5.0",
     instructions=(
         "Use create_style_profile first when a user has no profile. "
         "Then use add_reference_photos for the user's real photos. "
@@ -121,10 +122,12 @@ async def _download_openai_file(
         )
 
     timeout = httpx.Timeout(60.0, connect=15.0)
+    raw = bytearray()
+
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=timeout,
-        headers={"User-Agent": "AI-Stylist/0.4"},
+        headers={"User-Agent": "AI-Stylist/0.5"},
     ) as client:
         async with client.stream("GET", file.download_url) as response:
             response.raise_for_status()
@@ -141,60 +144,57 @@ async def _download_openai_file(
                     "Downloaded file is not a supported JPEG, PNG or WEBP image"
                 )
 
-            suffix = {
-                "image/jpeg": ".jpg",
-                "image/png": ".png",
-                "image/webp": ".webp",
-            }[effective_type]
+            async for chunk in response.aiter_bytes(1024 * 1024):
+                raw.extend(chunk)
+                if len(raw) > MAX_UPLOAD_BYTES:
+                    raise ValueError(
+                        "Reference photo is too large (max 15 MB)"
+                    )
 
-            photo_id = str(uuid4())
-            profile_dir = Path(settings.upload_dir) / profile_id
-            profile_dir.mkdir(parents=True, exist_ok=True)
-            destination = profile_dir / f"{photo_id}{suffix}"
+    try:
+        sanitized, stored_type = sanitize_image_bytes(
+            bytes(raw),
+            output_format="WEBP",
+            quality=95,
+        )
+    except InvalidImageError as exc:
+        raise ValueError(str(exc)) from exc
 
-            written = 0
-            try:
-                with destination.open("wb") as output:
-                    async for chunk in response.aiter_bytes(1024 * 1024):
-                        written += len(chunk)
-                        if written > MAX_UPLOAD_BYTES:
-                            raise ValueError(
-                                "Reference photo is too large (max 15 MB)"
-                            )
-                        output.write(chunk)
-            except Exception:
-                destination.unlink(missing_ok=True)
-                raise
-
-    if written == 0:
-        destination.unlink(missing_ok=True)
-        raise ValueError("Downloaded photo is empty")
+    photo_id = str(uuid4())
+    profile_dir = Path(settings.upload_dir) / profile_id
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    destination = profile_dir / f"{photo_id}.webp"
+    destination.write_bytes(sanitized)
 
     now = utc_now()
-    with connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO reference_photos (
-                id, profile_id, file_path, original_name, mime_type, created_at
+    try:
+        with connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO reference_photos (
+                    id, profile_id, file_path, original_name, mime_type, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    photo_id,
+                    profile_id,
+                    str(destination),
+                    file.file_name,
+                    stored_type,
+                    now,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                photo_id,
-                profile_id,
-                str(destination),
-                file.file_name,
-                effective_type,
-                now,
-            ),
-        )
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
 
     return {
         "id": photo_id,
         "profile_id": profile_id,
         "file_id": file.file_id,
         "file_name": file.file_name,
-        "mime_type": effective_type,
+        "mime_type": stored_type,
         "created_at": now,
     }
 
