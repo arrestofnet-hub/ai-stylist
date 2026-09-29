@@ -269,6 +269,7 @@ def _usage_to_dict(result: object) -> dict:
 
 
 def _call_openai(
+    profile_id: str,
     image_paths: list[Path],
     prompt: str,
     model: str,
@@ -285,15 +286,19 @@ def _call_openai(
                 stack.enter_context(path.open("rb"))
                 for path in image_paths
             ]
-            result = client.images.edit(
-                model=model,
-                image=images,
-                prompt=prompt,
-                size=settings.image_size,
-                quality=quality,
-                output_format=settings.image_output_format,
-                output_compression=settings.image_output_compression,
-            )
+            request = {
+                "model": model,
+                "image": images,
+                "prompt": prompt,
+                "size": settings.image_size,
+                "quality": quality,
+                "output_format": settings.image_output_format,
+                "user": profile_id,
+            }
+            if settings.image_output_format.lower() in {"webp", "jpeg"}:
+                request["output_compression"] = settings.image_output_compression
+
+            result = client.images.edit(**request)
     except ImageProviderUnavailable:
         raise
     except Exception as exc:
@@ -366,36 +371,41 @@ def generate_style_image(
     generation_id = str(uuid4())
     created_at = utc_now()
 
-    with connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO generations (
-                id, profile_id, mode, tier, instruction, prompt, model,
-                quality, size, status, base_generation_id, cost_credits,
-                charged_free, charged_paid, created_at
+    try:
+        with connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO generations (
+                    id, profile_id, mode, tier, instruction, prompt, model,
+                    quality, size, status, base_generation_id, cost_credits,
+                    charged_free, charged_paid, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?)
+                """,
+                (
+                    generation_id,
+                    profile_id,
+                    mode.value,
+                    tier.value,
+                    instruction,
+                    prompt,
+                    model,
+                    quality,
+                    settings.image_size,
+                    base_generation_id,
+                    cost,
+                    free_used,
+                    paid_used,
+                    created_at,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?)
-            """,
-            (
-                generation_id,
-                profile_id,
-                mode.value,
-                tier.value,
-                instruction,
-                prompt,
-                model,
-                quality,
-                settings.image_size,
-                base_generation_id,
-                cost,
-                free_used,
-                paid_used,
-                created_at,
-            ),
-        )
+    except Exception:
+        _refund_credits(profile_id, free_used, paid_used)
+        raise
 
     try:
         content, usage = _call_openai(
+            profile_id=profile_id,
             image_paths=image_paths,
             prompt=prompt,
             model=model,
