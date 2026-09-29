@@ -38,7 +38,7 @@ class JWKSJWTVerifier(TokenVerifier):
                 issuer=self.issuer,
                 options={"require": ["exp", "sub"]},
             )
-        except Exception:
+        except (jwt.PyJWTError, OSError, ValueError):
             return None
 
         subject = str(claims["sub"])
