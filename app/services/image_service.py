@@ -30,6 +30,10 @@ class InsufficientCredits(StylistError):
     pass
 
 
+class GenerationBusy(StylistError):
+    pass
+
+
 class InvalidGenerationRequest(StylistError):
     pass
 
@@ -171,18 +175,54 @@ def _insert_credit_transaction(
     )
 
 
-def _reserve_credits(
-    profile_id: str,
-    cost: int,
+def _start_generation_record(
+    *,
     generation_id: str,
-) -> tuple[int, int]:
+    profile_id: str,
+    mode: GenerationMode,
+    tier: GenerationTier,
+    instruction: str,
+    prompt: str,
+    model: str,
+    quality: str,
+    base_generation_id: str | None,
+    idempotency_key: str | None,
+    cost: int,
+    created_at: str,
+) -> tuple[int, int, dict | None]:
     with connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
+
+        if idempotency_key:
+            existing = conn.execute(
+                """
+                SELECT * FROM generations
+                WHERE profile_id = ? AND idempotency_key = ?
+                """,
+                (profile_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                return 0, 0, dict(existing)
+
+        active = conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM generations
+            WHERE profile_id = ? AND status = 'processing'
+            """,
+            (profile_id,),
+        ).fetchone()["n"]
+
+        max_active = max(1, settings.max_processing_generations_per_profile)
+        if int(active) >= max_active:
+            raise GenerationBusy(
+                "Another generation is already processing for this profile"
+            )
+
         row = conn.execute(
             "SELECT free_tries, paid_credits FROM profiles WHERE id = ?",
             (profile_id,),
         ).fetchone()
-
         if row is None:
             raise ProfileNotFound("Profile not found")
 
@@ -207,6 +247,34 @@ def _reserve_credits(
             (free_used, paid_used, utc_now(), profile_id),
         )
 
+        conn.execute(
+            """
+            INSERT INTO generations (
+                id, profile_id, mode, tier, instruction, prompt, model,
+                quality, size, status, base_generation_id, idempotency_key,
+                cost_credits, charged_free, charged_paid, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                generation_id,
+                profile_id,
+                mode.value,
+                tier.value,
+                instruction,
+                prompt,
+                model,
+                quality,
+                settings.image_size,
+                base_generation_id,
+                idempotency_key,
+                cost,
+                free_used,
+                paid_used,
+                created_at,
+            ),
+        )
+
         if paid_used:
             _insert_credit_transaction(
                 conn,
@@ -217,8 +285,7 @@ def _reserve_credits(
                 reason="Image generation credit reservation",
             )
 
-    return free_used, paid_used
-
+    return free_used, paid_used, None
 
 def _refund_credits(
     profile_id: str,
@@ -478,62 +545,22 @@ def generate_style_image(
     generation_id = str(uuid4())
     created_at = utc_now()
 
-    free_used, paid_used = _reserve_credits(
-        profile_id,
-        cost,
-        generation_id,
+    free_used, paid_used, existing = _start_generation_record(
+        generation_id=generation_id,
+        profile_id=profile_id,
+        mode=mode,
+        tier=tier,
+        instruction=instruction,
+        prompt=prompt,
+        model=model,
+        quality=quality,
+        base_generation_id=base_generation_id,
+        idempotency_key=idempotency_key,
+        cost=cost,
+        created_at=created_at,
     )
-
-    try:
-        with connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO generations (
-                    id, profile_id, mode, tier, instruction, prompt, model,
-                    quality, size, status, base_generation_id, idempotency_key,
-                    cost_credits, charged_free, charged_paid, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    generation_id,
-                    profile_id,
-                    mode.value,
-                    tier.value,
-                    instruction,
-                    prompt,
-                    model,
-                    quality,
-                    settings.image_size,
-                    base_generation_id,
-                    idempotency_key,
-                    cost,
-                    free_used,
-                    paid_used,
-                    created_at,
-                ),
-            )
-    except sqlite3.IntegrityError:
-        _refund_credits(
-            profile_id,
-            free_used,
-            paid_used,
-            generation_id,
-            "Duplicate idempotent request",
-        )
-        existing = _idempotent_generation(profile_id, idempotency_key)
-        if existing is not None:
-            return existing
-        raise
-    except Exception:
-        _refund_credits(
-            profile_id,
-            free_used,
-            paid_used,
-            generation_id,
-            "Generation record could not be created",
-        )
-        raise
+    if existing is not None:
+        return existing
 
     started = perf_counter()
 
