@@ -705,3 +705,46 @@ def test_mcp_profile_ownership_is_enforced(client, monkeypatch):
     monkeypatch.setattr(mcp_server, "current_subject", lambda: "user-b")
     with pytest.raises(ValueError, match="Profile not found"):
         mcp_server._ensure_profile_access(profile_id)
+
+
+def test_reference_readiness_reports_missing_views(client):
+    profile_id = create_profile(client)
+
+    empty = client.get(f"/api/v1/profiles/{profile_id}/readiness")
+    assert empty.status_code == 200
+    assert empty.json()["ready_for_try_on"] is False
+
+    front = client.post(
+        f"/api/v1/profiles/{profile_id}/photos",
+        data={"role": "front"},
+        files={"photo": ("front.jpg", make_image_bytes(), "image/jpeg")},
+    )
+    assert front.status_code == 201
+
+    one_view = client.get(f"/api/v1/profiles/{profile_id}/readiness").json()
+    assert one_view["ready_for_try_on"] is True
+    assert one_view["outfit_ready"] is False
+    assert one_view["haircut_ready"] is False
+    assert "full_body" in one_view["missing_recommended_roles"]
+
+    body = client.post(
+        f"/api/v1/profiles/{profile_id}/photos",
+        data={"role": "full_body"},
+        files={"photo": ("body.jpg", make_image_bytes(), "image/jpeg")},
+    )
+    assert body.status_code == 201
+
+    outfit = client.get(f"/api/v1/profiles/{profile_id}/readiness").json()
+    assert outfit["outfit_ready"] is True
+
+
+def test_reference_role_priority_depends_on_generation_mode():
+    haircut = image_service._reference_role_priority(
+        image_service.GenerationMode.haircut
+    )
+    outfit = image_service._reference_role_priority(
+        image_service.GenerationMode.outfit
+    )
+
+    assert haircut["side"] < haircut["full_body"]
+    assert outfit["full_body"] < outfit["side"]
