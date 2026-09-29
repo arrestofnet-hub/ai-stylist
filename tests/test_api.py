@@ -193,3 +193,56 @@ def test_mcp_server_imports():
     import mcp_server
 
     assert mcp_server.server is not None
+
+
+def test_update_preferences_api(client):
+    profile_id = create_profile(client)
+
+    response = client.patch(
+        f"/api/v1/profiles/{profile_id}",
+        json={
+            "style_goal": "strict but younger",
+            "preferences": {
+                "avoid_items": ["jeans"],
+                "preferred_items": ["suits", "hooded coats"],
+                "colors": ["navy", "charcoal"],
+                "notes": "Keep the face unchanged",
+                "preserve_identity": True,
+            },
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["style_goal"] == "strict but younger"
+    assert data["preferences"]["avoid_items"] == ["jeans"]
+    assert data["preferences"]["preserve_identity"] is True
+
+
+def test_mcp_file_param_schema():
+    import asyncio
+    import mcp_server
+
+    tools = asyncio.run(mcp_server.server.list_tools())
+    upload_tool = next(tool for tool in tools if tool.name == "add_reference_photos")
+
+    assert upload_tool.meta["openai/fileParams"] == ["files"]
+
+    schema = upload_tool.input_schema
+    file_schema = schema["properties"]["files"]["items"]
+    if "$ref" in file_schema:
+        ref_name = file_schema["$ref"].split("/")[-1]
+        file_schema = schema["$defs"][ref_name]
+
+    properties = file_schema["properties"]
+    required = set(file_schema["required"])
+
+    assert {"download_url", "file_id", "mime_type", "file_name"} <= set(properties)
+    assert required == {"download_url", "file_id"}
+
+
+def test_mcp_server_has_workflow_instructions():
+    import mcp_server
+
+    assert mcp_server.server.instructions
+    assert "add_reference_photos" in mcp_server.server.instructions
+    assert "get_generated_image" in mcp_server.server.instructions
