@@ -67,7 +67,15 @@ def _reference_paths(
                 f"""
                 SELECT * FROM reference_photos
                 WHERE profile_id = ? AND id IN ({placeholders})
-                ORDER BY created_at ASC
+                ORDER BY
+                    CASE role
+                        WHEN 'front' THEN 0
+                        WHEN 'three_quarter' THEN 1
+                        WHEN 'full_body' THEN 2
+                        WHEN 'side' THEN 3
+                        ELSE 4
+                    END,
+                    created_at ASC
                 """,
                 [profile_id, *requested_ids],
             ).fetchall()
@@ -81,7 +89,15 @@ def _reference_paths(
                 """
                 SELECT * FROM reference_photos
                 WHERE profile_id = ?
-                ORDER BY created_at ASC
+                ORDER BY
+                    CASE role
+                        WHEN 'front' THEN 0
+                        WHEN 'three_quarter' THEN 1
+                        WHEN 'full_body' THEN 2
+                        WHEN 'side' THEN 3
+                        ELSE 4
+                    END,
+                    created_at ASC
                 LIMIT ?
                 """,
                 (profile_id, settings.max_reference_images),
@@ -268,7 +284,9 @@ def build_prompt(
 ) -> str:
     identity_lock = """
 IDENTITY LOCK — highest priority:
-The first person shown in the supplied reference photographs is the same real user.
+All supplied reference photographs show the same real user from different viewpoints.
+Treat the earliest/front-facing reference as the primary identity reference and use
+the other references to preserve profile, hairline, body proportions and silhouette.
 Preserve the user's exact identity. Do not replace them with a generic model.
 Keep facial geometry, eyes, eyebrows, nose, lips, ears, skin tone, apparent age,
 head shape and recognizable likeness unchanged. Do not beautify, rejuvenate,
