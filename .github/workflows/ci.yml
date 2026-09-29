@@ -24,5 +24,8 @@ jobs:
       - name: Static checks
         run: ruff check app mcp_server.py tests scripts
 
+      - name: Validate plugin submission metadata
+        run: python scripts/validate_plugin.py
+
       - name: Run tests
         run: python -m pytest -q
