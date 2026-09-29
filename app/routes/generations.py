@@ -11,6 +11,7 @@ from app.services.image_service import (
     InvalidGenerationRequest,
     MissingReferencePhotos,
     ProfileNotFound,
+    delete_generation,
     generate_style_image,
     get_generation,
     list_generations,
@@ -85,6 +86,7 @@ def create_generation(
             tier=payload.tier,
             base_generation_id=payload.base_generation_id,
             reference_photo_ids=payload.reference_photo_ids,
+            idempotency_key=payload.idempotency_key,
         )
         return _to_output(row)
     except Exception as exc:
@@ -147,3 +149,18 @@ def generation_image(
         media_type=media_type,
         filename=path.name,
     )
+
+
+@router.delete(
+    "/{generation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_generation(
+    profile_id: str,
+    generation_id: str,
+):
+    try:
+        delete_generation(profile_id, generation_id)
+    except Exception as exc:
+        _raise_http(exc)
+        raise
