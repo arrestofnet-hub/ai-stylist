@@ -203,3 +203,15 @@ class GenerationFeedbackOut(BaseModel):
     note: str | None = None
     created_at: str
     updated_at: str
+
+
+class FeedbackStatsOut(BaseModel):
+    total: int
+    good: int
+    bad: int
+    face_changed: int
+    body_changed: int
+    wrong_item: int
+    unrealistic: int
+    style_mismatch: int
+    other: int
