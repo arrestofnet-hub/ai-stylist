@@ -1,9 +1,19 @@
+import json
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
-from app.schemas import GenerationListOut, GenerationOut, GenerationRequest
+from app.db import connection, utc_now
+from app.schemas import (
+    FeedbackIssue,
+    GenerationFeedbackOut,
+    GenerationFeedbackRequest,
+    GenerationListOut,
+    GenerationOut,
+    GenerationRequest,
+)
 from app.services.image_service import (
     GenerationBusy,
     ImageGenerationFailed,
@@ -109,6 +119,132 @@ def generation_history(
     except Exception as exc:
         _raise_http(exc)
         raise
+
+
+@router.put(
+    "/{generation_id}/feedback",
+    response_model=GenerationFeedbackOut,
+)
+def save_generation_feedback(
+    profile_id: str,
+    generation_id: str,
+    payload: GenerationFeedbackRequest,
+) -> GenerationFeedbackOut:
+    try:
+        get_generation(profile_id, generation_id)
+    except Exception as exc:
+        _raise_http(exc)
+        raise
+
+    now = utc_now()
+    issues_json = json.dumps(
+        [issue.value for issue in payload.issues],
+        ensure_ascii=False,
+    )
+
+    with connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT id, created_at
+            FROM generation_feedback
+            WHERE generation_id = ? AND profile_id = ?
+            """,
+            (generation_id, profile_id),
+        ).fetchone()
+
+        if existing is None:
+            feedback_id = str(uuid4())
+            created_at = now
+            conn.execute(
+                """
+                INSERT INTO generation_feedback (
+                    id, generation_id, profile_id, verdict,
+                    issues_json, note, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    feedback_id,
+                    generation_id,
+                    profile_id,
+                    payload.verdict.value,
+                    issues_json,
+                    payload.note,
+                    created_at,
+                    now,
+                ),
+            )
+        else:
+            feedback_id = str(existing["id"])
+            created_at = str(existing["created_at"])
+            conn.execute(
+                """
+                UPDATE generation_feedback
+                SET verdict = ?,
+                    issues_json = ?,
+                    note = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload.verdict.value,
+                    issues_json,
+                    payload.note,
+                    now,
+                    feedback_id,
+                ),
+            )
+
+    return GenerationFeedbackOut(
+        id=feedback_id,
+        generation_id=generation_id,
+        profile_id=profile_id,
+        verdict=payload.verdict,
+        issues=[FeedbackIssue(issue.value) for issue in payload.issues],
+        note=payload.note,
+        created_at=created_at,
+        updated_at=now,
+    )
+
+
+@router.get(
+    "/{generation_id}/feedback",
+    response_model=GenerationFeedbackOut | None,
+)
+def get_generation_feedback(
+    profile_id: str,
+    generation_id: str,
+) -> GenerationFeedbackOut | None:
+    try:
+        get_generation(profile_id, generation_id)
+    except Exception as exc:
+        _raise_http(exc)
+        raise
+
+    with connection() as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM generation_feedback
+            WHERE generation_id = ? AND profile_id = ?
+            """,
+            (generation_id, profile_id),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    issues = json.loads(row["issues_json"] or "[]")
+    return GenerationFeedbackOut(
+        id=row["id"],
+        generation_id=row["generation_id"],
+        profile_id=row["profile_id"],
+        verdict=row["verdict"],
+        issues=[FeedbackIssue(value) for value in issues],
+        note=row["note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 @router.get("/{generation_id}", response_model=GenerationOut)
