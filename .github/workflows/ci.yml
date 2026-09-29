@@ -21,5 +21,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Static checks
+        run: ruff check app mcp_server.py tests scripts
+
       - name: Run tests
         run: python -m pytest -q
