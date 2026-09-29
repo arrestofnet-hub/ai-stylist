@@ -1,8 +1,8 @@
 from io import BytesIO
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-import pytest
 
 from app.config import settings
 from app.main import app
@@ -182,6 +182,7 @@ def test_prompt_locks_identity():
 
 def test_openai_image_edit_parameters_are_supported():
     import inspect
+
     from openai import OpenAI
 
     client = OpenAI(api_key="test")
@@ -230,6 +231,7 @@ def test_update_preferences_api(client):
 
 def test_mcp_file_param_schema():
     import asyncio
+
     import mcp_server
 
     tools = asyncio.run(mcp_server.server.list_tools())
@@ -467,6 +469,7 @@ def test_readiness_reports_provider_configuration(client, monkeypatch):
 
 def test_mcp_tools_have_safety_annotations():
     import asyncio
+
     import mcp_server
 
     tools = asyncio.run(mcp_server.server.list_tools())
