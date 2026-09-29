@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from mcp_server import server as mcp_server
 
 from app.config import settings
 from app.db import connection, init_db
