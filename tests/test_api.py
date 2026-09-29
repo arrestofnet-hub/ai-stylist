@@ -826,3 +826,89 @@ def test_mcp_user_can_remove_reference_and_profile(client):
 
     missing = client.get(f"/api/v1/profiles/{profile_id}")
     assert missing.status_code == 404
+
+
+def test_generation_feedback_can_be_created_and_updated(client, monkeypatch):
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    monkeypatch.setattr(
+        image_service,
+        "_call_openai",
+        lambda *args, **kwargs: (b"fake-webp-image", {}),
+    )
+
+    generated = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json={
+            "mode": "outfit",
+            "instruction": "Black suit",
+            "tier": "preview",
+        },
+    )
+    assert generated.status_code == 201
+    generation_id = generated.json()["id"]
+
+    bad = client.put(
+        f"/api/v1/profiles/{profile_id}/generations/{generation_id}/feedback",
+        json={
+            "verdict": "bad",
+            "issues": ["face_changed", "style_mismatch"],
+            "note": "Face drifted",
+        },
+    )
+    assert bad.status_code == 200
+    assert bad.json()["issues"] == ["face_changed", "style_mismatch"]
+
+    good = client.put(
+        f"/api/v1/profiles/{profile_id}/generations/{generation_id}/feedback",
+        json={
+            "verdict": "good",
+            "issues": [],
+            "note": "Second review",
+        },
+    )
+    assert good.status_code == 200
+    assert good.json()["id"] == bad.json()["id"]
+    assert good.json()["verdict"] == "good"
+
+    fetched = client.get(
+        f"/api/v1/profiles/{profile_id}/generations/{generation_id}/feedback"
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["verdict"] == "good"
+
+
+def test_mcp_feedback_tool_records_identity_issue(client, monkeypatch):
+    import mcp_server
+    from app.schemas import FeedbackIssue, FeedbackVerdict
+
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    monkeypatch.setattr(
+        image_service,
+        "_call_openai",
+        lambda *args, **kwargs: (b"fake-webp-image", {}),
+    )
+
+    generated = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json={
+            "mode": "haircut",
+            "instruction": "Textured crop",
+            "tier": "preview",
+        },
+    )
+    generation_id = generated.json()["id"]
+
+    result = mcp_server.rate_style_result(
+        profile_id=profile_id,
+        generation_id=generation_id,
+        verdict=FeedbackVerdict.bad,
+        issues=[FeedbackIssue.face_changed],
+        note="Identity drift",
+    )
+
+    assert result["verdict"] == "bad"
+    assert result["issues"] == ["face_changed"]
