@@ -141,6 +141,19 @@ def init_db() -> None:
                 FOREIGN KEY(base_generation_id) REFERENCES generations(id) ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS generation_feedback (
+                id TEXT PRIMARY KEY,
+                generation_id TEXT NOT NULL UNIQUE,
+                profile_id TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                issues_json TEXT NOT NULL DEFAULT '[]',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(generation_id) REFERENCES generations(id) ON DELETE CASCADE,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS credit_transactions (
                 id TEXT PRIMARY KEY,
                 profile_id TEXT NOT NULL,
@@ -163,6 +176,9 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_credit_transactions_profile
                 ON credit_transactions(profile_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_generation_feedback_profile
+                ON generation_feedback(profile_id, updated_at);
             """
         )
         _apply_migrations(conn)
