@@ -5,3 +5,4 @@ python-multipart
 httpx
 openai
 mcp>=2,<3
+Pillow>=11,<13
