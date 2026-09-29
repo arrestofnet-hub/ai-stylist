@@ -112,7 +112,9 @@ def _base_generation_path(profile_id: str, generation_id: str) -> Path:
 
 
 def _credit_cost(tier: GenerationTier) -> int:
-    return 1 if tier == GenerationTier.preview else 4
+    if tier == GenerationTier.preview:
+        return settings.preview_credit_cost
+    return settings.final_credit_cost
 
 
 def _model_and_quality(tier: GenerationTier) -> tuple[str, str]:
