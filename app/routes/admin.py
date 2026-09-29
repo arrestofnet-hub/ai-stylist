@@ -1,4 +1,6 @@
 import hmac
+import json
+from collections import defaultdict
 from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -10,6 +12,8 @@ from app.schemas import (
     CreditGrantRequest,
     CreditTransactionOut,
     MaintenanceOut,
+    UsageModelStats,
+    UsageStatsOut,
 )
 from app.services.image_service import (
     purge_expired_generated_files,
@@ -163,3 +167,102 @@ def run_maintenance(
         stale_generations_recovered=recover_stale_generations(),
         generated_files_deleted=purge_expired_generated_files(),
     )
+
+
+@router.get("/usage", response_model=UsageStatsOut)
+def usage_stats(
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+) -> UsageStatsOut:
+    _require_admin_key(x_admin_key)
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT model, tier, usage_json, duration_ms
+            FROM generations
+            WHERE status = 'completed'
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
+
+    buckets: dict[tuple[str, str], dict[str, object]] = defaultdict(
+        lambda: {
+            "generations": 0,
+            "input_tokens": 0,
+            "input_image_tokens": 0,
+            "input_text_tokens": 0,
+            "output_tokens": 0,
+            "output_image_tokens": 0,
+            "output_text_tokens": 0,
+            "total_tokens": 0,
+            "durations": [],
+        }
+    )
+
+    for row in rows:
+        key = (str(row["model"]), str(row["tier"]))
+        bucket = buckets[key]
+        bucket["generations"] = int(bucket["generations"]) + 1
+
+        usage: dict = {}
+        if row["usage_json"]:
+            try:
+                parsed = json.loads(row["usage_json"])
+                if isinstance(parsed, dict):
+                    usage = parsed
+            except json.JSONDecodeError:
+                usage = {}
+
+        input_details = usage.get("input_tokens_details") or {}
+        output_details = usage.get("output_tokens_details") or {}
+
+        bucket["input_tokens"] = int(bucket["input_tokens"]) + int(
+            usage.get("input_tokens") or 0
+        )
+        bucket["input_image_tokens"] = int(bucket["input_image_tokens"]) + int(
+            input_details.get("image_tokens") or 0
+        )
+        bucket["input_text_tokens"] = int(bucket["input_text_tokens"]) + int(
+            input_details.get("text_tokens") or 0
+        )
+        bucket["output_tokens"] = int(bucket["output_tokens"]) + int(
+            usage.get("output_tokens") or 0
+        )
+        bucket["output_image_tokens"] = int(bucket["output_image_tokens"]) + int(
+            output_details.get("image_tokens") or 0
+        )
+        bucket["output_text_tokens"] = int(bucket["output_text_tokens"]) + int(
+            output_details.get("text_tokens") or 0
+        )
+        bucket["total_tokens"] = int(bucket["total_tokens"]) + int(
+            usage.get("total_tokens") or 0
+        )
+
+        if row["duration_ms"] is not None:
+            bucket["durations"].append(int(row["duration_ms"]))
+
+    items: list[UsageModelStats] = []
+    for (model, tier), bucket in sorted(buckets.items()):
+        durations = bucket["durations"]
+        avg_duration = (
+            sum(durations) / len(durations)
+            if isinstance(durations, list) and durations
+            else None
+        )
+        items.append(
+            UsageModelStats(
+                model=model,
+                tier=tier,
+                generations=int(bucket["generations"]),
+                input_tokens=int(bucket["input_tokens"]),
+                input_image_tokens=int(bucket["input_image_tokens"]),
+                input_text_tokens=int(bucket["input_text_tokens"]),
+                output_tokens=int(bucket["output_tokens"]),
+                output_image_tokens=int(bucket["output_image_tokens"]),
+                output_text_tokens=int(bucket["output_text_tokens"]),
+                total_tokens=int(bucket["total_tokens"]),
+                avg_duration_ms=avg_duration,
+            )
+        )
+
+    return UsageStatsOut(items=items)
