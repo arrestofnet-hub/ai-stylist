@@ -15,6 +15,13 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     admin_api_key: str | None = None
+
+    mcp_auth_enabled: bool = False
+    oauth_issuer_url: str | None = None
+    oauth_jwks_url: str | None = None
+    mcp_resource_url: str | None = None
+    oauth_required_scopes: str = "stylist"
+    oauth_algorithms: str = "RS256"
     preview_image_model: str = "gpt-image-2.5-flare"
     final_image_model: str = "gpt-image-2.5-sunburst"
     preview_image_quality: str = "medium"
