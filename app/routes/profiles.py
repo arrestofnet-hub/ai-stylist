@@ -1,6 +1,7 @@
 import json
 import shutil
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
@@ -161,8 +162,8 @@ def list_reference_photos(profile_id: str) -> list[PhotoOut]:
 )
 def upload_reference_photo(
     profile_id: str,
-    photo: UploadFile = File(...),
-    role: ReferencePhotoRole = Form(default=ReferencePhotoRole.other),
+    photo: Annotated[UploadFile, File()],
+    role: Annotated[ReferencePhotoRole, Form()] = ReferencePhotoRole.other,
 ) -> PhotoOut:
     _profile_or_404(profile_id)
 
