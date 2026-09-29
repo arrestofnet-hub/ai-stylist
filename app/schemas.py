@@ -95,3 +95,19 @@ class GenerationOut(BaseModel):
 
 class GenerationListOut(BaseModel):
     items: list[GenerationOut]
+
+
+class CreditGrantRequest(BaseModel):
+    amount: int = Field(gt=0, le=100000)
+    reason: str | None = Field(default=None, max_length=500)
+    external_reference: str | None = Field(default=None, max_length=200)
+
+
+class CreditTransactionOut(BaseModel):
+    id: str
+    profile_id: str
+    amount: int
+    kind: str
+    reason: str | None = None
+    external_reference: str | None = None
+    created_at: str
