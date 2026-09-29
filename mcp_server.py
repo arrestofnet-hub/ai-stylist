@@ -10,9 +10,15 @@ from mcp.server.mcpserver import Image
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 
+from app.auth import current_subject, mcp_auth_kwargs
 from app.config import settings
 from app.db import connection, utc_now
-from app.routes.profiles import create_profile, get_balance, get_profile, update_profile
+from app.routes.profiles import (
+    create_profile_record,
+    get_balance,
+    get_profile,
+    update_profile,
+)
 from app.schemas import (
     GenerationMode,
     GenerationTier,
@@ -44,6 +50,7 @@ server = MCPServer(
         "explicitly request an identity-changing edit. After a generation succeeds, "
         "use get_generated_image so the actual image is returned to the user."
     ),
+    **mcp_auth_kwargs(),
 )
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -89,14 +96,6 @@ class OpenAIFile(BaseModel):
     file_name: str | None = None
 
 
-def _image_url(profile_id: str, generation_id: str) -> str:
-    base = settings.public_base_url.rstrip("/")
-    return (
-        f"{base}/api/v1/profiles/{profile_id}/generations/"
-        f"{generation_id}/image"
-    )
-
-
 def _generation_payload(row: dict) -> dict:
     result = {
         "id": row["id"],
@@ -112,21 +111,29 @@ def _generation_payload(row: dict) -> dict:
         "created_at": row["created_at"],
         "completed_at": row.get("completed_at"),
     }
-    if row.get("status") == "completed":
-        result["image_url"] = _image_url(row["profile_id"], row["id"])
+    result["image_available"] = bool(
+        row.get("status") == "completed" and row.get("output_path")
+    )
     if row.get("error_message"):
         result["error_message"] = row["error_message"]
     return result
 
 
-def _ensure_profile_exists(profile_id: str) -> None:
+def _ensure_profile_access(profile_id: str) -> None:
     with connection() as conn:
         row = conn.execute(
-            "SELECT id FROM profiles WHERE id = ?",
+            "SELECT id, owner_subject FROM profiles WHERE id = ?",
             (profile_id,),
         ).fetchone()
+
     if row is None:
         raise ValueError("Profile not found")
+
+    if settings.mcp_auth_enabled:
+        subject = current_subject()
+        if not subject or row["owner_subject"] != subject:
+            # Do not reveal whether another user's profile exists.
+            raise ValueError("Profile not found")
 
 
 def _photo_count(profile_id: str) -> int:
@@ -287,7 +294,10 @@ def create_style_profile(
             preserve_identity=True,
         ),
     )
-    return create_profile(payload).model_dump(mode="json")
+    return create_profile_record(
+        payload,
+        owner_subject=current_subject(),
+    ).model_dump(mode="json")
 
 
 @server.tool(
@@ -310,7 +320,7 @@ async def add_reference_photos(
     roles: list[ReferencePhotoRole] | None = None,
 ) -> list[dict]:
     """Attach 1-5 user-selected reference photos to an AI Stylist profile."""
-    _ensure_profile_exists(profile_id)
+    _ensure_profile_access(profile_id)
 
     if not files:
         raise ValueError("At least one reference photo is required")
@@ -345,6 +355,7 @@ async def add_reference_photos(
 )
 def get_style_profile(profile_id: str) -> dict:
     """Get a saved AI Stylist profile and its current reference-photo count."""
+    _ensure_profile_access(profile_id)
     return get_profile(profile_id).model_dump(mode="json")
 
 
@@ -357,6 +368,7 @@ def get_style_profile(profile_id: str) -> dict:
 )
 def get_style_balance(profile_id: str) -> dict:
     """Get free tries and paid-credit balance for an AI Stylist profile."""
+    _ensure_profile_access(profile_id)
     return get_balance(profile_id).model_dump(mode="json")
 
 
@@ -378,6 +390,7 @@ def update_style_preferences(
     notes: str | None = None,
 ) -> dict:
     """Update what the stylist should remember about the user's clothing and style preferences."""
+    _ensure_profile_access(profile_id)
     current = get_profile(profile_id)
 
     current_preferences = current.preferences.model_dump()
@@ -405,6 +418,8 @@ def _run_generation(
     tier: str,
     base_generation_id: str | None = None,
 ) -> dict:
+    _ensure_profile_access(profile_id)
+
     try:
         generation_tier = GenerationTier(tier)
     except ValueError as exc:
@@ -543,6 +558,8 @@ def change_one_item(
 )
 def recent_style_generations(profile_id: str, limit: int = 10) -> list[dict]:
     """Return recent generated looks for a profile."""
+    _ensure_profile_access(profile_id)
+
     try:
         rows = list_generations(profile_id, limit=limit)
     except StylistError as exc:
@@ -563,6 +580,8 @@ def get_generated_image(
     generation_id: str,
 ) -> Image:
     """Return a completed generated look as an actual image content block."""
+    _ensure_profile_access(profile_id)
+
     try:
         row = get_generation(profile_id, generation_id)
     except StylistError as exc:
