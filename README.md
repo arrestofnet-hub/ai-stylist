@@ -21,6 +21,9 @@
 - Удаление профиля вместе с фото и результатами.
 - REST API на FastAPI.
 - MCP-сервер для подключения к ChatGPT Plugins.
+- Нативная передача изображений из ChatGPT через `openai/fileParams` — пользователь может прикреплять фото прямо в чат.
+- MCP возвращает готовый результат как image content через `get_generated_image`.
+- Отдельная память предпочтений (`update_style_preferences`).
 - GitHub Actions тесты.
 - PM2, Docker Compose и Nginx-конфиги для деплоя.
 
@@ -131,13 +134,16 @@ GET    /api/v1/profiles/{profile_id}/generations/{generation_id}/image
 Сервер предоставляет инструменты:
 
 - `create_style_profile`;
+- `add_reference_photos` — принимает нативные ChatGPT file inputs;
 - `get_style_profile`;
 - `get_style_balance`;
+- `update_style_preferences`;
 - `try_outfit`;
 - `try_haircut`;
 - `create_full_look`;
 - `change_one_item`;
-- `recent_style_generations`.
+- `recent_style_generations`;
+- `get_generated_image` — отдаёт результат как настоящее изображение, а не только URL.
 
 После публичного деплоя MCP URL будет вида:
 
@@ -202,6 +208,7 @@ GitHub Actions автоматически запускает тесты при �
 ## Безопасность и данные
 
 - Реальный `OPENAI_API_KEY` не хранится в GitHub.
+- Для тестового начисления кредитов есть отдельный `ADMIN_API_KEY`; если он не задан, admin endpoint отключён.
 - `.env`, SQLite, uploads и generated исключены из git.
 - Фото ограничены JPEG/PNG/WebP, максимум 15 MB на файл.
 - До 5 reference photos на профиль.
@@ -217,3 +224,24 @@ GitHub Actions автоматически запускает тесты при �
 5. Проверить реальные Flare/Sunburst генерации и фактический `usage`.
 6. После этого окончательно зафиксировать цены пакетов и маржу.
 
+
+
+## Тестовое начисление кредитов
+
+До подключения реального эквайринга можно безопасно пополнять баланс тестовых пользователей через защищённый endpoint:
+
+```
+POST /api/v1/admin/profiles/{profile_id}/credits
+X-Admin-Key: <ADMIN_API_KEY>
+```
+
+Тело:
+
+```json
+{
+  "amount": 20,
+  "reason": "closed beta"
+}
+```
+
+Все начисления записываются в отдельный `credit_transactions` ledger. Платёжный провайдер позже должен начислять кредиты через ту же модель только после проверки webhook-подписи и факта оплаты.
