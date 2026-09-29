@@ -145,7 +145,7 @@ GET    /api/v1/profiles/{profile_id}/generations/{generation_id}/image
 - `recent_style_generations`;
 - `get_generated_image` — отдаёт результат как настоящее изображение, а не только URL.
 
-После публичного деплоя MCP URL будет вида:
+Для публичного деплоя один HTTPS-домен должен отдавать MCP и публичные policy endpoints. MCP URL будет вида:
 
 ```
 https://stylist.example.com/mcp
@@ -245,3 +245,18 @@ X-Admin-Key: <ADMIN_API_KEY>
 ```
 
 Все начисления записываются в отдельный `credit_transactions` ledger. Платёжный провайдер позже должен начислять кредиты через ту же модель только после проверки webhook-подписи и факта оплаты.
+
+
+## Готовность к каталогу плагинов
+
+Репозиторий подготовлен под plugin-first выпуск:
+
+- `plugin.json` содержит directory metadata и starter prompts;
+- все MCP tools имеют явные `readOnlyHint`, `openWorldHint`, `destructiveHint`;
+- `/privacy`, `/terms`, `/support` реализованы в FastAPI;
+- `/.well-known/openai-apps-challenge` готов для domain verification;
+- `SUBMISSION.md` содержит 5 positive и 3 negative reviewer-теста;
+- CI выполняет `scripts/validate_plugin.py`, чтобы publication metadata не ломались незаметно;
+- Nginx-шаблон публикует MCP, policy endpoints и verification endpoint на одном домене.
+
+До публичной отправки остаются внешние зависимости: production HTTPS-домен, реальный image-provider key, настроенный OAuth provider, reviewer demo account и реальные image end-to-end проверки.
