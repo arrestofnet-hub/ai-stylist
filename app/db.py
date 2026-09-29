@@ -46,6 +46,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "duration_ms" not in generation_columns:
         conn.execute("ALTER TABLE generations ADD COLUMN duration_ms INTEGER")
 
+    profile_columns = _column_names(conn, "profiles")
+    if "owner_subject" not in profile_columns:
+        conn.execute("ALTER TABLE profiles ADD COLUMN owner_subject TEXT")
+
     photo_columns = _column_names(conn, "reference_photos")
     if "role" not in photo_columns:
         conn.execute(
@@ -74,6 +78,7 @@ def init_db() -> None:
                 weight_kg REAL,
                 style_goal TEXT,
                 preferences_json TEXT NOT NULL DEFAULT '{}',
+                owner_subject TEXT,
                 free_tries INTEGER NOT NULL DEFAULT 3,
                 paid_credits INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
@@ -127,6 +132,9 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
+
+            CREATE INDEX IF NOT EXISTS idx_profiles_owner
+                ON profiles(owner_subject);
 
             CREATE INDEX IF NOT EXISTS idx_reference_photos_profile
                 ON reference_photos(profile_id, created_at);
