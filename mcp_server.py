@@ -14,8 +14,12 @@ from pydantic import BaseModel
 from app.auth import current_subject, mcp_auth_kwargs
 from app.config import settings
 from app.db import connection, utc_now
+from app.routes import generations as generation_routes
 from app.routes import profiles as profile_routes
 from app.schemas import (
+    FeedbackIssue,
+    FeedbackVerdict,
+    GenerationFeedbackRequest,
     GenerationMode,
     GenerationTier,
     ProfileCreate,
@@ -667,6 +671,36 @@ def change_one_item(
         tier=tier,
         base_generation_id=base_generation_id,
     )
+
+
+@server.tool(
+    title="Rate style result",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
+def rate_style_result(
+    profile_id: str,
+    generation_id: str,
+    verdict: FeedbackVerdict,
+    issues: list[FeedbackIssue] | None = None,
+    note: str | None = None,
+) -> dict:
+    """Save user feedback about a generated look, including identity-drift issues."""
+    _ensure_profile_access(profile_id)
+    payload = GenerationFeedbackRequest(
+        verdict=verdict,
+        issues=issues or [],
+        note=note,
+    )
+    return generation_routes.save_generation_feedback(
+        profile_id,
+        generation_id,
+        payload,
+    ).model_dump(mode="json")
 
 
 @server.tool(
