@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     admin_api_key: str | None = None
+    openai_apps_challenge_token: str | None = None
 
     mcp_auth_enabled: bool = False
     oauth_issuer_url: str | None = None
