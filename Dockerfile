@@ -12,6 +12,6 @@ COPY . .
 
 RUN mkdir -p /app/data /app/uploads /app/generated
 
-EXPOSE 8010 8011
+EXPOSE 8010
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
