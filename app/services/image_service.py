@@ -64,9 +64,7 @@ def _profile(profile_id: str) -> dict:
 def _reference_role_priority(mode: GenerationMode) -> dict[str, int]:
     if mode == GenerationMode.haircut:
         order = ["front", "three_quarter", "side", "full_body", "other"]
-    elif mode == GenerationMode.outfit:
-        order = ["front", "full_body", "three_quarter", "side", "other"]
-    elif mode == GenerationMode.full_look:
+    elif mode in {GenerationMode.outfit, GenerationMode.full_look}:
         order = ["front", "full_body", "three_quarter", "side", "other"]
     else:
         order = ["front", "three_quarter", "full_body", "side", "other"]
