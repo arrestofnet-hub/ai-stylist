@@ -1,3 +1,8 @@
+---
+name: ai-stylist
+description: Use AI Stylist to try clothing and haircuts on a user's own reference photos while preserving identity, preferences, and credit limits.
+---
+
 # AI Stylist
 
 Use this skill when the user wants to try clothing, change a haircut, build a complete look, or edit one element of an existing AI Stylist result.
