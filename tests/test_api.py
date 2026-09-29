@@ -487,3 +487,131 @@ def test_mcp_rejects_private_file_download_urls():
 
     with pytest.raises(ValueError):
         mcp_server._validate_public_https_url("https://127.0.0.1/file.jpg")
+
+
+def test_processing_generation_blocks_parallel_charge(client, monkeypatch):
+    from app.db import connection, utc_now
+
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO generations (
+                id, profile_id, mode, tier, instruction, prompt, model,
+                quality, size, status, cost_credits, charged_free,
+                charged_paid, created_at
+            )
+            VALUES (?, ?, 'outfit', 'preview', 'existing', 'existing',
+                    'test-model', 'medium', '1024x1536', 'processing',
+                    1, 0, 0, ?)
+            """,
+            ("busy-generation", profile_id, utc_now()),
+        )
+
+    monkeypatch.setattr(
+        image_service,
+        "_call_openai",
+        lambda *args, **kwargs: (b"fake", {}),
+    )
+
+    before = client.get(f"/api/v1/profiles/{profile_id}/balance").json()
+    response = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json={
+            "mode": "outfit",
+            "instruction": "Second outfit",
+            "tier": "preview",
+        },
+    )
+    after = client.get(f"/api/v1/profiles/{profile_id}/balance").json()
+
+    assert response.status_code == 409
+    assert after == before
+
+
+def test_stale_processing_generation_is_refunded(client):
+    from app.db import connection
+
+    profile_id = create_profile(client)
+
+    with connection() as conn:
+        conn.execute(
+            "UPDATE profiles SET free_tries = 2 WHERE id = ?",
+            (profile_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO generations (
+                id, profile_id, mode, tier, instruction, prompt, model,
+                quality, size, status, cost_credits, charged_free,
+                charged_paid, created_at
+            )
+            VALUES (?, ?, 'outfit', 'preview', 'stale', 'stale',
+                    'test-model', 'medium', '1024x1536', 'processing',
+                    1, 1, 0, '2000-01-01T00:00:00+00:00')
+            """,
+            ("stale-generation", profile_id),
+        )
+
+    recovered = image_service.recover_stale_generations()
+    assert recovered == 1
+
+    balance = client.get(f"/api/v1/profiles/{profile_id}/balance").json()
+    assert balance["free_tries"] == 3
+
+    generation = client.get(
+        f"/api/v1/profiles/{profile_id}/generations/stale-generation"
+    )
+    assert generation.status_code == 200
+    assert generation.json()["status"] == "failed"
+
+
+def test_paid_credit_failure_creates_charge_and_refund_ledger(client, monkeypatch):
+    from app.db import connection
+
+    monkeypatch.setattr(settings, "admin_api_key", "secret-test-key")
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    with connection() as conn:
+        conn.execute(
+            "UPDATE profiles SET free_tries = 0 WHERE id = ?",
+            (profile_id,),
+        )
+
+    grant = client.post(
+        f"/api/v1/admin/profiles/{profile_id}/credits",
+        headers={"X-Admin-Key": "secret-test-key"},
+        json={"amount": 5, "reason": "paid ledger test"},
+    )
+    assert grant.status_code == 201
+
+    monkeypatch.setattr(
+        image_service,
+        "_call_openai",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ImageGenerationFailed("provider failed")
+        ),
+    )
+
+    failed = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json={
+            "mode": "outfit",
+            "instruction": "Paid generation",
+            "tier": "preview",
+        },
+    )
+    assert failed.status_code == 502
+
+    balance = client.get(f"/api/v1/profiles/{profile_id}/balance").json()
+    assert balance["paid_credits"] == 5
+
+    stats = client.get(
+        "/api/v1/admin/stats",
+        headers={"X-Admin-Key": "secret-test-key"},
+    ).json()
+    assert stats["paid_credits_charged"] >= 1
+    assert stats["paid_credits_refunded"] >= 1
