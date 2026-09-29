@@ -90,8 +90,22 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_reference_photos_profile
                 ON reference_photos(profile_id, created_at);
 
+            CREATE TABLE IF NOT EXISTS credit_transactions (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                reason TEXT,
+                external_reference TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_generations_profile
                 ON generations(profile_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_credit_transactions_profile
+                ON credit_transactions(profile_id, created_at);
             """
         )
 
