@@ -155,6 +155,9 @@ class UsageModelStats(BaseModel):
     output_text_tokens: int
     total_tokens: int
     avg_duration_ms: float | None = None
+    estimated_cost_usd: float = 0.0
+    estimated_cost_kzt: float | None = None
+    avg_cost_per_generation_usd: float = 0.0
 
 
 class UsageStatsOut(BaseModel):
