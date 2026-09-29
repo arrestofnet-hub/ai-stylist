@@ -615,3 +615,36 @@ def test_paid_credit_failure_creates_charge_and_refund_ledger(client, monkeypatc
     ).json()
     assert stats["paid_credits_charged"] >= 1
     assert stats["paid_credits_refunded"] >= 1
+
+
+def test_portable_plugin_manifest_and_skill_metadata():
+    import json
+    from pathlib import Path
+
+    manifest = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
+    assert manifest["name"] == "ai-stylist"
+    assert manifest["$schema"].endswith("/plugin.schema.json")
+
+    skill = Path("skills/ai-stylist/SKILL.md").read_text(encoding="utf-8")
+    assert skill.startswith("---\n")
+    assert "name: ai-stylist" in skill
+    assert "description:" in skill
+
+
+def test_plugin_mcp_url_generator():
+    from scripts.configure_plugin import normalize_mcp_url
+
+    assert (
+        normalize_mcp_url("https://stylist.example.com")
+        == "https://stylist.example.com/mcp"
+    )
+    assert (
+        normalize_mcp_url("https://stylist.example.com/mcp")
+        == "https://stylist.example.com/mcp"
+    )
+
+    with pytest.raises(ValueError):
+        normalize_mcp_url("http://stylist.example.com/mcp")
+
+    with pytest.raises(ValueError):
+        normalize_mcp_url("https://stylist.example.com/not-mcp")
