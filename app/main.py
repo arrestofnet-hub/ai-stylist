@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.db import init_db
+from app.db import connection, init_db
 from app.routes.admin import router as admin_router
 from app.routes.generations import router as generations_router
 from app.routes.profiles import router as profiles_router
@@ -41,3 +42,28 @@ def root() -> dict[str, str]:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.get("/ready")
+def readiness():
+    database_ready = False
+    try:
+        with connection() as conn:
+            conn.execute("SELECT 1").fetchone()
+        database_ready = True
+    except Exception:
+        database_ready = False
+
+    provider_ready = bool(settings.openai_api_key)
+    ready = database_ready and provider_ready
+
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        "database": "ready" if database_ready else "unavailable",
+        "image_provider": "configured" if provider_ready else "not_configured",
+    }
+
+    if ready:
+        return payload
+
+    return JSONResponse(status_code=503, content=payload)
