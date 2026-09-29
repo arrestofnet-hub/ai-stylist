@@ -477,3 +477,13 @@ def test_mcp_tools_have_safety_annotations():
     assert by_name["try_outfit"].annotations.read_only_hint is False
     assert by_name["try_outfit"].annotations.destructive_hint is False
     assert by_name["update_style_preferences"].annotations.idempotent_hint is True
+
+
+def test_mcp_rejects_private_file_download_urls():
+    import mcp_server
+
+    with pytest.raises(ValueError):
+        mcp_server._validate_public_https_url("http://example.com/file.jpg")
+
+    with pytest.raises(ValueError):
+        mcp_server._validate_public_https_url("https://127.0.0.1/file.jpg")
