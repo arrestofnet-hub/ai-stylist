@@ -39,7 +39,7 @@ server = MCPServer(
     "AI Stylist",
     title="AI Stylist",
     description="Personal virtual stylist for clothing and haircut try-ons.",
-    version="0.5.0",
+    version="0.6.0",
     instructions=(
         "When authentication is enabled, use get_my_style_profile first. "
         "Use create_style_profile only when the user has no profile. "
@@ -188,7 +188,7 @@ async def _download_openai_file(
     async with httpx.AsyncClient(
         follow_redirects=False,
         timeout=timeout,
-        headers={"User-Agent": "AI-Stylist/0.5"},
+        headers={"User-Agent": "AI-Stylist/0.6"},
     ) as client:
         for _ in range(MAX_DOWNLOAD_REDIRECTS + 1):
             _validate_public_https_url(current_url)
