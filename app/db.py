@@ -43,6 +43,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     generation_columns = _column_names(conn, "generations")
     if "idempotency_key" not in generation_columns:
         conn.execute("ALTER TABLE generations ADD COLUMN idempotency_key TEXT")
+    if "duration_ms" not in generation_columns:
+        conn.execute("ALTER TABLE generations ADD COLUMN duration_ms INTEGER")
 
     photo_columns = _column_names(conn, "reference_photos")
     if "role" not in photo_columns:
@@ -107,6 +109,7 @@ def init_db() -> None:
                 charged_free INTEGER NOT NULL DEFAULT 0,
                 charged_paid INTEGER NOT NULL DEFAULT 0,
                 usage_json TEXT,
+                duration_ms INTEGER,
                 error_message TEXT,
                 created_at TEXT NOT NULL,
                 completed_at TEXT,
