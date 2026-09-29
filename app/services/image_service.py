@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from openai import OpenAI
@@ -534,6 +535,8 @@ def generate_style_image(
         )
         raise
 
+    started = perf_counter()
+
     try:
         content, usage = _call_openai(
             profile_id=profile_id,
@@ -550,6 +553,7 @@ def generate_style_image(
         output_path.write_bytes(content)
 
         completed_at = utc_now()
+        duration_ms = int((perf_counter() - started) * 1000)
         with connection() as conn:
             conn.execute(
                 """
@@ -557,12 +561,14 @@ def generate_style_image(
                 SET status = 'completed',
                     output_path = ?,
                     usage_json = ?,
+                    duration_ms = ?,
                     completed_at = ?
                 WHERE id = ?
                 """,
                 (
                     str(output_path),
                     json.dumps(usage, ensure_ascii=False),
+                    duration_ms,
                     completed_at,
                     generation_id,
                 ),
@@ -575,16 +581,18 @@ def generate_style_image(
             generation_id,
             "Image generation failed",
         )
+        duration_ms = int((perf_counter() - started) * 1000)
         with connection() as conn:
             conn.execute(
                 """
                 UPDATE generations
                 SET status = 'failed',
                     error_message = ?,
+                    duration_ms = ?,
                     completed_at = ?
                 WHERE id = ?
                 """,
-                (str(exc)[:2000], utc_now(), generation_id),
+                (str(exc)[:2000], duration_ms, utc_now(), generation_id),
             )
         if isinstance(exc, StylistError):
             raise
