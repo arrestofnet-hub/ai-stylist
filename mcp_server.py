@@ -1,6 +1,14 @@
-from mcp.server.fastmcp import FastMCP
+from pathlib import Path
+from urllib.parse import urlparse
+from uuid import uuid4
+
+import httpx
+from mcp.server import MCPServer
+from mcp.server.mcpserver import Image
+from pydantic import BaseModel
 
 from app.config import settings
+from app.db import connection, utc_now
 from app.routes.profiles import create_profile, get_balance, get_profile
 from app.schemas import (
     GenerationMode,
@@ -11,15 +19,22 @@ from app.schemas import (
 from app.services.image_service import (
     StylistError,
     generate_style_image,
+    get_generation,
     list_generations,
 )
 
-server = FastMCP(
-    "ai-stylist",
-    host=settings.host,
-    port=settings.mcp_port,
-    stateless_http=True,
-)
+server = MCPServer("AI Stylist")
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+MAX_REFERENCE_PHOTOS = 5
+
+
+class OpenAIFile(BaseModel):
+    download_url: str
+    file_id: str
+    mime_type: str | None = None
+    file_name: str | None = None
 
 
 def _image_url(profile_id: str, generation_id: str) -> str:
@@ -52,6 +67,122 @@ def _generation_payload(row: dict) -> dict:
     return result
 
 
+def _ensure_profile_exists(profile_id: str) -> None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM profiles WHERE id = ?",
+            (profile_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError("Profile not found")
+
+
+def _photo_count(profile_id: str) -> int:
+    with connection() as conn:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM reference_photos WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()["n"]
+        )
+
+
+async def _download_openai_file(
+    profile_id: str,
+    file: OpenAIFile,
+) -> dict:
+    parsed = urlparse(file.download_url)
+    if parsed.scheme != "https":
+        raise ValueError("File download URL must use HTTPS")
+
+    mime_type = (file.mime_type or "").lower()
+    if mime_type and mime_type not in ALLOWED_IMAGE_TYPES:
+        raise ValueError("Only JPEG, PNG and WEBP reference photos are supported")
+
+    if _photo_count(profile_id) >= MAX_REFERENCE_PHOTOS:
+        raise ValueError(
+            f"Maximum {MAX_REFERENCE_PHOTOS} reference photos allowed"
+        )
+
+    timeout = httpx.Timeout(60.0, connect=15.0)
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=timeout,
+        headers={"User-Agent": "AI-Stylist/0.4"},
+    ) as client:
+        async with client.stream("GET", file.download_url) as response:
+            response.raise_for_status()
+
+            response_type = (
+                response.headers.get("content-type", "")
+                .split(";", 1)[0]
+                .strip()
+                .lower()
+            )
+            effective_type = mime_type or response_type
+            if effective_type not in ALLOWED_IMAGE_TYPES:
+                raise ValueError(
+                    "Downloaded file is not a supported JPEG, PNG or WEBP image"
+                )
+
+            suffix = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+            }[effective_type]
+
+            photo_id = str(uuid4())
+            profile_dir = Path(settings.upload_dir) / profile_id
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            destination = profile_dir / f"{photo_id}{suffix}"
+
+            written = 0
+            try:
+                with destination.open("wb") as output:
+                    async for chunk in response.aiter_bytes(1024 * 1024):
+                        written += len(chunk)
+                        if written > MAX_UPLOAD_BYTES:
+                            raise ValueError(
+                                "Reference photo is too large (max 15 MB)"
+                            )
+                        output.write(chunk)
+            except Exception:
+                destination.unlink(missing_ok=True)
+                raise
+
+    if written == 0:
+        destination.unlink(missing_ok=True)
+        raise ValueError("Downloaded photo is empty")
+
+    now = utc_now()
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO reference_photos (
+                id, profile_id, file_path, original_name, mime_type, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                photo_id,
+                profile_id,
+                str(destination),
+                file.file_name,
+                effective_type,
+                now,
+            ),
+        )
+
+    return {
+        "id": photo_id,
+        "profile_id": profile_id,
+        "file_id": file.file_id,
+        "file_name": file.file_name,
+        "mime_type": effective_type,
+        "created_at": now,
+    }
+
+
 @server.tool()
 def create_style_profile(
     display_name: str | None = None,
@@ -65,7 +196,7 @@ def create_style_profile(
     colors: list[str] | None = None,
     notes: str | None = None,
 ) -> dict:
-    """Create an AI Stylist profile. New profiles receive three free preview credits."""
+    """Create an AI Stylist profile. New profiles receive free preview credits."""
     payload = ProfileCreate(
         display_name=display_name,
         age_range=age_range,
@@ -82,6 +213,35 @@ def create_style_profile(
         ),
     )
     return create_profile(payload).model_dump(mode="json")
+
+
+@server.tool(
+    meta={"openai/fileParams": ["files"]},
+)
+async def add_reference_photos(
+    profile_id: str,
+    files: list[OpenAIFile],
+) -> list[dict]:
+    """Attach 1-5 user-selected reference photos to an AI Stylist profile."""
+    _ensure_profile_exists(profile_id)
+
+    if not files:
+        raise ValueError("At least one reference photo is required")
+    if len(files) > MAX_REFERENCE_PHOTOS:
+        raise ValueError(
+            f"Upload no more than {MAX_REFERENCE_PHOTOS} photos at once"
+        )
+
+    remaining = MAX_REFERENCE_PHOTOS - _photo_count(profile_id)
+    if len(files) > remaining:
+        raise ValueError(
+            f"This profile can accept only {remaining} more reference photos"
+        )
+
+    saved: list[dict] = []
+    for file in files:
+        saved.append(await _download_openai_file(profile_id, file))
+    return saved
 
 
 @server.tool()
@@ -194,5 +354,32 @@ def recent_style_generations(profile_id: str, limit: int = 10) -> list[dict]:
     return [_generation_payload(row) for row in rows]
 
 
+@server.tool(structured_output=False)
+def get_generated_image(
+    profile_id: str,
+    generation_id: str,
+) -> Image:
+    """Return a completed generated look as an actual image content block."""
+    try:
+        row = get_generation(profile_id, generation_id)
+    except StylistError as exc:
+        raise ValueError(str(exc)) from exc
+
+    if row.get("status") != "completed" or not row.get("output_path"):
+        raise ValueError("Generation is not completed")
+
+    path = Path(row["output_path"])
+    if not path.exists():
+        raise ValueError("Generated image file is unavailable")
+    return Image(path=path)
+
+
 if __name__ == "__main__":
-    server.run(transport="streamable-http")
+    server.run(
+        transport="streamable-http",
+        host=settings.host,
+        port=settings.mcp_port,
+        streamable_http_path="/mcp",
+        stateless_http=True,
+        json_response=True,
+    )
