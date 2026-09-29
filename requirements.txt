@@ -6,3 +6,4 @@ httpx
 openai
 mcp>=2,<3
 Pillow>=11,<13
+PyJWT[crypto]>=2.10,<3
