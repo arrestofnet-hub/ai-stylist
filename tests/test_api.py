@@ -168,3 +168,28 @@ def test_prompt_locks_identity():
     assert "Preserve the user's exact identity" in prompt
     assert "Do not use: jeans" in prompt
     assert "Try a navy suit" in prompt
+
+
+def test_openai_image_edit_parameters_are_supported():
+    import inspect
+    from openai import OpenAI
+
+    client = OpenAI(api_key="test")
+    params = inspect.signature(client.images.edit).parameters
+    for name in [
+        "model",
+        "image",
+        "prompt",
+        "size",
+        "quality",
+        "output_format",
+        "output_compression",
+        "user",
+    ]:
+        assert name in params
+
+
+def test_mcp_server_imports():
+    import mcp_server
+
+    assert mcp_server.server is not None
