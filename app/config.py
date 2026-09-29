@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     free_tries_on_signup: int = 3
     preview_credit_cost: int = 1
     final_credit_cost: int = 4
+    stale_generation_minutes: int = 30
+    generated_retention_days: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",
