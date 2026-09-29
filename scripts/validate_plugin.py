@@ -35,7 +35,7 @@ for node in tree.body:
             None,
         )
         if not isinstance(annotations, ast.Call):
-            raise AssertionError(f"{node.name}: annotations=ToolAnnotations(...) is required")
+            raise TypeError(f"{node.name}: annotations=ToolAnnotations(...) is required")
         keys = {kw.arg for kw in annotations.keywords if kw.arg}
         missing = REQUIRED_HINTS - keys
         if missing:
