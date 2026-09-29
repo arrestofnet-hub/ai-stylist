@@ -60,6 +60,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
 
     conn.execute(
         """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_owner_unique
+        ON profiles(owner_subject)
+        WHERE owner_subject IS NOT NULL
+        """
+    )
+
+    conn.execute(
+        """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_reference_photos_hash
         ON reference_photos(profile_id, sha256)
         WHERE sha256 IS NOT NULL
