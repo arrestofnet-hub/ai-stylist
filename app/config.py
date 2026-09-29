@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     image_output_format: str = "webp"
     image_output_compression: int = 88
     max_reference_images: int = 3
+    free_tries_on_signup: int = 3
+    preview_credit_cost: int = 1
+    final_credit_cost: int = 4
 
     model_config = SettingsConfigDict(
         env_file=".env",
