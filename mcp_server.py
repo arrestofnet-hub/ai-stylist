@@ -14,16 +14,7 @@ from pydantic import BaseModel
 from app.auth import current_subject, mcp_auth_kwargs
 from app.config import settings
 from app.db import connection, utc_now
-from app.routes.profiles import (
-    create_profile_record,
-    delete_profile as delete_profile_api,
-    delete_reference_photo as delete_reference_photo_api,
-    get_balance,
-    get_profile,
-    get_profile_readiness,
-    list_reference_photos as list_reference_photos_api,
-    update_profile,
-)
+from app.routes import profiles as profile_routes
 from app.schemas import (
     GenerationMode,
     GenerationTier,
@@ -332,7 +323,7 @@ def create_style_profile(
             preserve_identity=True,
         ),
     )
-    return create_profile_record(
+    return profile_routes.create_profile_record(
         payload,
         owner_subject=current_subject(),
     ).model_dump(mode="json")
@@ -394,7 +385,7 @@ async def add_reference_photos(
 def get_style_profile(profile_id: str) -> dict:
     """Get a saved AI Stylist profile and its current reference-photo count."""
     _ensure_profile_access(profile_id)
-    return get_profile(profile_id).model_dump(mode="json")
+    return profile_routes.get_profile(profile_id).model_dump(mode="json")
 
 
 @server.tool(
@@ -423,7 +414,7 @@ def get_my_style_profile() -> dict:
 
     return {
         "authenticated": True,
-        "profile": get_profile(profile_id).model_dump(mode="json"),
+        "profile": profile_routes.get_profile(profile_id).model_dump(mode="json"),
     }
 
 
@@ -439,7 +430,7 @@ def list_style_reference_photos(profile_id: str) -> list[dict]:
     _ensure_profile_access(profile_id)
     return [
         item.model_dump(mode="json")
-        for item in list_reference_photos_api(profile_id)
+        for item in profile_routes.list_reference_photos(profile_id)
     ]
 
 
@@ -455,7 +446,7 @@ def list_style_reference_photos(profile_id: str) -> list[dict]:
 def remove_style_reference_photo(profile_id: str, photo_id: str) -> dict:
     """Permanently remove one saved reference photo."""
     _ensure_profile_access(profile_id)
-    delete_reference_photo_api(profile_id, photo_id)
+    profile_routes.delete_reference_photo(profile_id, photo_id)
     return {"deleted": True, "photo_id": photo_id}
 
 
@@ -471,7 +462,7 @@ def remove_style_reference_photo(profile_id: str, photo_id: str) -> dict:
 def delete_style_profile(profile_id: str) -> dict:
     """Permanently delete the style profile, its photos, generated images, and history."""
     _ensure_profile_access(profile_id)
-    delete_profile_api(profile_id)
+    profile_routes.delete_profile(profile_id)
     return {"deleted": True, "profile_id": profile_id}
 
 
@@ -485,7 +476,7 @@ def delete_style_profile(profile_id: str) -> dict:
 def get_style_readiness(profile_id: str) -> dict:
     """Check whether saved reference photos are sufficient for outfit and haircut try-ons."""
     _ensure_profile_access(profile_id)
-    return get_profile_readiness(profile_id).model_dump(mode="json")
+    return profile_routes.get_profile_readiness(profile_id).model_dump(mode="json")
 
 
 @server.tool(
@@ -498,7 +489,7 @@ def get_style_readiness(profile_id: str) -> dict:
 def get_style_balance(profile_id: str) -> dict:
     """Get free tries and paid-credit balance for an AI Stylist profile."""
     _ensure_profile_access(profile_id)
-    return get_balance(profile_id).model_dump(mode="json")
+    return profile_routes.get_balance(profile_id).model_dump(mode="json")
 
 
 @server.tool(
@@ -520,7 +511,7 @@ def update_style_preferences(
 ) -> dict:
     """Update what the stylist should remember about the user's clothing and style preferences."""
     _ensure_profile_access(profile_id)
-    current = get_profile(profile_id)
+    current = profile_routes.get_profile(profile_id)
 
     current_preferences = current.preferences.model_dump()
     if preferred_items is not None:
@@ -537,7 +528,7 @@ def update_style_preferences(
         style_goal=style_goal if style_goal is not None else current.style_goal,
         preferences=StylePreferences(**current_preferences),
     )
-    return update_profile(profile_id, payload).model_dump(mode="json")
+    return profile_routes.update_profile(profile_id, payload).model_dump(mode="json")
 
 
 def _run_generation(
