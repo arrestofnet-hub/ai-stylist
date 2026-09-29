@@ -101,6 +101,7 @@ class GenerationOut(BaseModel):
     error_message: str | None = None
     created_at: str
     completed_at: str | None = None
+    duration_ms: int | None = None
 
 
 class GenerationListOut(BaseModel):
@@ -140,3 +141,21 @@ class AdminStatsOut(BaseModel):
 class MaintenanceOut(BaseModel):
     stale_generations_recovered: int = 0
     generated_files_deleted: int = 0
+
+
+class UsageModelStats(BaseModel):
+    model: str
+    tier: str
+    generations: int
+    input_tokens: int
+    input_image_tokens: int
+    input_text_tokens: int
+    output_tokens: int
+    output_image_tokens: int
+    output_text_tokens: int
+    total_tokens: int
+    avg_duration_ms: float | None = None
+
+
+class UsageStatsOut(BaseModel):
+    items: list[UsageModelStats]
