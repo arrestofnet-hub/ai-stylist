@@ -162,3 +162,13 @@ class UsageModelStats(BaseModel):
 
 class UsageStatsOut(BaseModel):
     items: list[UsageModelStats]
+
+
+class ProfileReadinessOut(BaseModel):
+    profile_id: str
+    photo_count: int
+    roles_present: list[ReferencePhotoRole]
+    ready_for_try_on: bool
+    outfit_ready: bool
+    haircut_ready: bool
+    missing_recommended_roles: list[ReferencePhotoRole]
