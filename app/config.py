@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     generated_dir: str = "generated"
 
     openai_api_key: str | None = None
+    admin_api_key: str | None = None
     preview_image_model: str = "gpt-image-2.5-flare"
     final_image_model: str = "gpt-image-2.5-sunburst"
     preview_image_quality: str = "medium"
