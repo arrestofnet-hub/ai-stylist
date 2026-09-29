@@ -9,11 +9,12 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import connection, utc_now
-from app.routes.profiles import create_profile, get_balance, get_profile
+from app.routes.profiles import create_profile, get_balance, get_profile, update_profile
 from app.schemas import (
     GenerationMode,
     GenerationTier,
     ProfileCreate,
+    ProfileUpdate,
     StylePreferences,
 )
 from app.services.image_service import (
@@ -23,7 +24,22 @@ from app.services.image_service import (
     list_generations,
 )
 
-server = MCPServer("AI Stylist")
+server = MCPServer(
+    "AI Stylist",
+    title="AI Stylist",
+    description="Personal virtual stylist for clothing and haircut try-ons.",
+    version="0.4.0",
+    instructions=(
+        "Use create_style_profile first when a user has no profile. "
+        "Then use add_reference_photos for the user's real photos. "
+        "Never generate a try-on before at least one reference photo exists. "
+        "Use try_outfit for clothing, try_haircut for hair only, create_full_look "
+        "for coordinated changes, and change_one_item when the user wants a precise "
+        "edit of an existing result. Preserve the user's identity unless they "
+        "explicitly request an identity-changing edit. After a generation succeeds, "
+        "use get_generated_image so the actual image is returned to the user."
+    ),
+)
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
@@ -254,6 +270,36 @@ def get_style_profile(profile_id: str) -> dict:
 def get_style_balance(profile_id: str) -> dict:
     """Get free tries and paid-credit balance for an AI Stylist profile."""
     return get_balance(profile_id).model_dump(mode="json")
+
+
+@server.tool()
+def update_style_preferences(
+    profile_id: str,
+    style_goal: str | None = None,
+    preferred_items: list[str] | None = None,
+    avoid_items: list[str] | None = None,
+    colors: list[str] | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Update what the stylist should remember about the user's clothing and style preferences."""
+    current = get_profile(profile_id)
+
+    current_preferences = current.preferences.model_dump()
+    if preferred_items is not None:
+        current_preferences["preferred_items"] = preferred_items
+    if avoid_items is not None:
+        current_preferences["avoid_items"] = avoid_items
+    if colors is not None:
+        current_preferences["colors"] = colors
+    if notes is not None:
+        current_preferences["notes"] = notes
+    current_preferences["preserve_identity"] = True
+
+    payload = ProfileUpdate(
+        style_goal=style_goal if style_goal is not None else current.style_goal,
+        preferences=StylePreferences(**current_preferences),
+    )
+    return update_profile(profile_id, payload).model_dump(mode="json")
 
 
 def _run_generation(
