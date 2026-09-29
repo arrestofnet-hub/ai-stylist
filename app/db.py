@@ -44,6 +44,12 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "idempotency_key" not in generation_columns:
         conn.execute("ALTER TABLE generations ADD COLUMN idempotency_key TEXT")
 
+    photo_columns = _column_names(conn, "reference_photos")
+    if "role" not in photo_columns:
+        conn.execute(
+            "ALTER TABLE reference_photos ADD COLUMN role TEXT NOT NULL DEFAULT 'other'"
+        )
+
     conn.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_generations_idempotency
@@ -78,6 +84,7 @@ def init_db() -> None:
                 file_path TEXT NOT NULL,
                 original_name TEXT,
                 mime_type TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'other',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
