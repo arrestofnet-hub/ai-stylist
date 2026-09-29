@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 
 from app.schemas import GenerationListOut, GenerationOut, GenerationRequest
 from app.services.image_service import (
+    GenerationBusy,
     ImageGenerationFailed,
     ImageProviderUnavailable,
     InsufficientCredits,
@@ -61,6 +62,8 @@ def _raise_http(exc: Exception) -> None:
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=str(exc),
         ) from exc
+    if isinstance(exc, GenerationBusy):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, InvalidGenerationRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if isinstance(exc, ImageProviderUnavailable):
