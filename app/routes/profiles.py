@@ -1,9 +1,8 @@
 import json
-import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from app.config import settings
 from app.db import connection, decode_preferences, utc_now
@@ -20,6 +19,7 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_REFERENCE_PHOTOS = 5
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
 def _profile_or_404(profile_id: str) -> dict:
@@ -84,7 +84,7 @@ def get_profile(profile_id: str) -> ProfileOut:
 
 @router.patch("/{profile_id}", response_model=ProfileOut)
 def update_profile(profile_id: str, payload: ProfileUpdate) -> ProfileOut:
-    current = _profile_or_404(profile_id)
+    _profile_or_404(profile_id)
     changes = payload.model_dump(exclude_unset=True)
 
     if "preferences" in changes and changes["preferences"] is not None:
@@ -101,7 +101,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> ProfileOut:
         "style_goal",
         "preferences_json",
     }
-    changes = {k: v for k, v in changes.items() if k in allowed}
+    changes = {key: value for key, value in changes.items() if key in allowed}
 
     if changes:
         changes["updated_at"] = utc_now()
@@ -124,6 +124,22 @@ def get_balance(profile_id: str) -> BalanceOut:
         paid_credits=paid_credits,
         total_available=free_tries + paid_credits,
     )
+
+
+@router.get("/{profile_id}/photos", response_model=list[PhotoOut])
+def list_reference_photos(profile_id: str) -> list[PhotoOut]:
+    _profile_or_404(profile_id)
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, profile_id, original_name, mime_type, created_at
+            FROM reference_photos
+            WHERE profile_id = ?
+            ORDER BY created_at ASC
+            """,
+            (profile_id,),
+        ).fetchall()
+    return [PhotoOut(**dict(row)) for row in rows]
 
 
 @router.post(
@@ -166,8 +182,27 @@ def upload_reference_photo(
     profile_dir.mkdir(parents=True, exist_ok=True)
     destination = profile_dir / f"{photo_id}{suffix}"
 
-    with destination.open("wb") as output:
-        shutil.copyfileobj(photo.file, output)
+    written = 0
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = photo.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Reference photo is too large (max 15 MB)",
+                    )
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+    if written == 0:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded photo is empty")
 
     now = utc_now()
     with connection() as conn:
@@ -195,3 +230,31 @@ def upload_reference_photo(
         mime_type=photo.content_type,
         created_at=now,
     )
+
+
+@router.delete(
+    "/{profile_id}/photos/{photo_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_reference_photo(profile_id: str, photo_id: str) -> Response:
+    _profile_or_404(profile_id)
+
+    with connection() as conn:
+        row = conn.execute(
+            """
+            SELECT file_path FROM reference_photos
+            WHERE id = ? AND profile_id = ?
+            """,
+            (photo_id, profile_id),
+        ).fetchone()
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="Reference photo not found")
+
+        conn.execute(
+            "DELETE FROM reference_photos WHERE id = ? AND profile_id = ?",
+            (photo_id, profile_id),
+        )
+
+    Path(row["file_path"]).unlink(missing_ok=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
