@@ -767,3 +767,62 @@ def test_duplicate_reference_photo_is_rejected(client):
         files={"photo": ("same.jpg", image, "image/jpeg")},
     )
     assert duplicate.status_code == 409
+
+
+def test_authenticated_profile_is_reused(client):
+    from app.routes.profiles import create_profile_record
+    from app.schemas import ProfileCreate
+
+    first = create_profile_record(
+        ProfileCreate(display_name="First"),
+        owner_subject="auth-user-1",
+    )
+    second = create_profile_record(
+        ProfileCreate(display_name="Second"),
+        owner_subject="auth-user-1",
+    )
+
+    assert first.id == second.id
+    assert second.display_name == "First"
+
+
+def test_get_my_style_profile_uses_authenticated_subject(client, monkeypatch):
+    import mcp_server
+    from app.db import connection
+
+    profile_id = create_profile(client)
+    with connection() as conn:
+        conn.execute(
+            "UPDATE profiles SET owner_subject = ? WHERE id = ?",
+            ("user-me", profile_id),
+        )
+
+    monkeypatch.setattr(settings, "mcp_auth_enabled", True)
+    monkeypatch.setattr(mcp_server, "current_subject", lambda: "user-me")
+
+    result = mcp_server.get_my_style_profile()
+    assert result["authenticated"] is True
+    assert result["profile"]["id"] == profile_id
+
+
+def test_mcp_user_can_remove_reference_and_profile(client):
+    import mcp_server
+
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    photos = mcp_server.list_style_reference_photos(profile_id)
+    assert len(photos) == 1
+
+    deleted_photo = mcp_server.remove_style_reference_photo(
+        profile_id,
+        photos[0]["id"],
+    )
+    assert deleted_photo["deleted"] is True
+    assert mcp_server.list_style_reference_photos(profile_id) == []
+
+    deleted_profile = mcp_server.delete_style_profile(profile_id)
+    assert deleted_profile["deleted"] is True
+
+    missing = client.get(f"/api/v1/profiles/{profile_id}")
+    assert missing.status_code == 404
