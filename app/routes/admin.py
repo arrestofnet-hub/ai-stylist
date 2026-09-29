@@ -249,19 +249,60 @@ def usage_stats(
             if isinstance(durations, list) and durations
             else None
         )
+        generations_count = int(bucket["generations"])
+        input_tokens = int(bucket["input_tokens"])
+        input_image_tokens = int(bucket["input_image_tokens"])
+        input_text_tokens = int(bucket["input_text_tokens"])
+        output_tokens = int(bucket["output_tokens"])
+        output_image_tokens = int(bucket["output_image_tokens"])
+        output_text_tokens = int(bucket["output_text_tokens"])
+
+        unclassified_input = max(
+            0,
+            input_tokens - input_image_tokens - input_text_tokens,
+        )
+        unclassified_output = max(
+            0,
+            output_tokens - output_image_tokens - output_text_tokens,
+        )
+
+        estimated_cost_usd = (
+            input_text_tokens * settings.image_text_input_usd_per_million
+            + (input_image_tokens + unclassified_input)
+            * settings.image_input_usd_per_million
+            + (output_image_tokens + unclassified_output)
+            * settings.image_output_usd_per_million
+        ) / 1_000_000
+
+        estimated_cost_kzt = (
+            estimated_cost_usd * settings.usd_kzt_rate
+            if settings.usd_kzt_rate > 0
+            else None
+        )
+
         items.append(
             UsageModelStats(
                 model=model,
                 tier=tier,
-                generations=int(bucket["generations"]),
-                input_tokens=int(bucket["input_tokens"]),
-                input_image_tokens=int(bucket["input_image_tokens"]),
-                input_text_tokens=int(bucket["input_text_tokens"]),
-                output_tokens=int(bucket["output_tokens"]),
-                output_image_tokens=int(bucket["output_image_tokens"]),
-                output_text_tokens=int(bucket["output_text_tokens"]),
+                generations=generations_count,
+                input_tokens=input_tokens,
+                input_image_tokens=input_image_tokens,
+                input_text_tokens=input_text_tokens,
+                output_tokens=output_tokens,
+                output_image_tokens=output_image_tokens,
+                output_text_tokens=output_text_tokens,
                 total_tokens=int(bucket["total_tokens"]),
                 avg_duration_ms=avg_duration,
+                estimated_cost_usd=round(estimated_cost_usd, 6),
+                estimated_cost_kzt=(
+                    round(estimated_cost_kzt, 2)
+                    if estimated_cost_kzt is not None
+                    else None
+                ),
+                avg_cost_per_generation_usd=round(
+                    estimated_cost_usd / generations_count,
+                    6,
+                ) if generations_count else 0.0,
             )
         )
 
