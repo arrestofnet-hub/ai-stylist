@@ -55,6 +55,15 @@ def create_profile_record(
     payload: ProfileCreate,
     owner_subject: str | None = None,
 ) -> ProfileOut:
+    if owner_subject:
+        with connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM profiles WHERE owner_subject = ?",
+                (owner_subject,),
+            ).fetchone()
+        if existing is not None:
+            return ProfileOut(**_profile_or_404(existing["id"]))
+
     profile_id = str(uuid4())
     now = utc_now()
 
