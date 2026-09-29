@@ -10,6 +10,7 @@ from app.routes.admin import router as admin_router
 from app.routes.generations import router as generations_router
 from app.routes.profiles import router as profiles_router
 from app.services.image_service import recover_stale_generations
+
 from mcp_server import server as mcp_server
 
 
