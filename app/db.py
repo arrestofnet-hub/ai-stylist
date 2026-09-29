@@ -1,10 +1,9 @@
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
-
 from app.config import settings
 
 
