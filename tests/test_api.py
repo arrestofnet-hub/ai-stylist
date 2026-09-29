@@ -648,3 +648,57 @@ def test_plugin_mcp_url_generator():
 
     with pytest.raises(ValueError):
         normalize_mcp_url("https://stylist.example.com/not-mcp")
+
+
+def test_oauth_is_optional_for_closed_beta(monkeypatch):
+    from app import auth
+
+    monkeypatch.setattr(settings, "mcp_auth_enabled", False)
+    assert auth.mcp_auth_kwargs() == {}
+
+
+def test_oauth_configuration_validation(monkeypatch):
+    from app import auth
+
+    monkeypatch.setattr(settings, "mcp_auth_enabled", True)
+    monkeypatch.setattr(settings, "oauth_issuer_url", None)
+    monkeypatch.setattr(settings, "oauth_jwks_url", None)
+    monkeypatch.setattr(settings, "mcp_resource_url", None)
+
+    with pytest.raises(RuntimeError):
+        auth.mcp_auth_kwargs()
+
+    monkeypatch.setattr(settings, "oauth_issuer_url", "https://auth.example.com")
+    monkeypatch.setattr(
+        settings,
+        "oauth_jwks_url",
+        "https://auth.example.com/.well-known/jwks.json",
+    )
+    monkeypatch.setattr(
+        settings,
+        "mcp_resource_url",
+        "https://stylist.example.com/mcp",
+    )
+    configured = auth.mcp_auth_kwargs()
+    assert configured["token_verifier"] is not None
+    assert configured["auth"].required_scopes == ["stylist"]
+
+
+def test_mcp_profile_ownership_is_enforced(client, monkeypatch):
+    import mcp_server
+    from app.db import connection
+
+    profile_id = create_profile(client)
+    with connection() as conn:
+        conn.execute(
+            "UPDATE profiles SET owner_subject = ? WHERE id = ?",
+            ("user-a", profile_id),
+        )
+
+    monkeypatch.setattr(settings, "mcp_auth_enabled", True)
+    monkeypatch.setattr(mcp_server, "current_subject", lambda: "user-a")
+    mcp_server._ensure_profile_access(profile_id)
+
+    monkeypatch.setattr(mcp_server, "current_subject", lambda: "user-b")
+    with pytest.raises(ValueError, match="Profile not found"):
+        mcp_server._ensure_profile_access(profile_id)
