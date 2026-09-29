@@ -48,8 +48,10 @@ def _profile_or_404(profile_id: str) -> dict:
     return data
 
 
-@router.post("", response_model=ProfileOut, status_code=status.HTTP_201_CREATED)
-def create_profile(payload: ProfileCreate) -> ProfileOut:
+def create_profile_record(
+    payload: ProfileCreate,
+    owner_subject: str | None = None,
+) -> ProfileOut:
     profile_id = str(uuid4())
     now = utc_now()
 
@@ -58,10 +60,10 @@ def create_profile(payload: ProfileCreate) -> ProfileOut:
             """
             INSERT INTO profiles (
                 id, display_name, age_range, gender, height_cm, weight_kg,
-                style_goal, preferences_json, free_tries, paid_credits,
-                created_at, updated_at
+                style_goal, preferences_json, owner_subject,
+                free_tries, paid_credits, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
             """,
             (
                 profile_id,
@@ -72,6 +74,7 @@ def create_profile(payload: ProfileCreate) -> ProfileOut:
                 payload.weight_kg,
                 payload.style_goal,
                 json.dumps(payload.preferences.model_dump(), ensure_ascii=False),
+                owner_subject,
                 settings.free_tries_on_signup,
                 now,
                 now,
@@ -79,6 +82,11 @@ def create_profile(payload: ProfileCreate) -> ProfileOut:
         )
 
     return ProfileOut(**_profile_or_404(profile_id))
+
+
+@router.post("", response_model=ProfileOut, status_code=status.HTTP_201_CREATED)
+def create_profile(payload: ProfileCreate) -> ProfileOut:
+    return create_profile_record(payload)
 
 
 @router.get("/{profile_id}", response_model=ProfileOut)
