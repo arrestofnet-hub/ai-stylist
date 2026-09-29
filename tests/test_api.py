@@ -40,9 +40,9 @@ def create_profile(client: TestClient) -> str:
     return data["id"]
 
 
-def make_image_bytes() -> bytes:
+def make_image_bytes(color: str = "white") -> bytes:
     buffer = BytesIO()
-    Image.new("RGB", (640, 800), "white").save(buffer, format="JPEG", quality=90)
+    Image.new("RGB", (640, 800), color).save(buffer, format="JPEG", quality=90)
     return buffer.getvalue()
 
 
@@ -730,7 +730,7 @@ def test_reference_readiness_reports_missing_views(client):
     body = client.post(
         f"/api/v1/profiles/{profile_id}/photos",
         data={"role": "full_body"},
-        files={"photo": ("body.jpg", make_image_bytes(), "image/jpeg")},
+        files={"photo": ("body.jpg", make_image_bytes("gray"), "image/jpeg")},
     )
     assert body.status_code == 201
 
@@ -748,3 +748,22 @@ def test_reference_role_priority_depends_on_generation_mode():
 
     assert haircut["side"] < haircut["full_body"]
     assert outfit["full_body"] < outfit["side"]
+
+
+def test_duplicate_reference_photo_is_rejected(client):
+    profile_id = create_profile(client)
+    image = make_image_bytes("navy")
+
+    first = client.post(
+        f"/api/v1/profiles/{profile_id}/photos",
+        data={"role": "front"},
+        files={"photo": ("one.jpg", image, "image/jpeg")},
+    )
+    assert first.status_code == 201
+
+    duplicate = client.post(
+        f"/api/v1/profiles/{profile_id}/photos",
+        data={"role": "side"},
+        files={"photo": ("same.jpg", image, "image/jpeg")},
+    )
+    assert duplicate.status_code == 409
