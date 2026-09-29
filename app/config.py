@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     preview_image_model: str = "gpt-image-2.5-flare"
     final_image_model: str = "gpt-image-2.5-sunburst"
-    preview_image_quality: str = "low"
+    preview_image_quality: str = "medium"
     final_image_quality: str = "medium"
     image_size: str = "1024x1536"
     image_output_format: str = "webp"
