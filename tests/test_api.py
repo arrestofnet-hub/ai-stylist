@@ -399,6 +399,7 @@ def test_reference_photo_role_is_stored(client):
 
 def test_admin_usage_stats(client, monkeypatch):
     monkeypatch.setattr(settings, "admin_api_key", "secret-test-key")
+    monkeypatch.setattr(settings, "usd_kzt_rate", 443.0)
     profile_id = create_profile(client)
     upload_reference(client, profile_id)
 
@@ -446,6 +447,9 @@ def test_admin_usage_stats(client, monkeypatch):
     assert preview["input_image_tokens"] >= 100
     assert preview["output_tokens"] >= 300
     assert preview["total_tokens"] >= 420
+    assert preview["estimated_cost_usd"] > 0
+    assert preview["estimated_cost_kzt"] > 0
+    assert preview["avg_cost_per_generation_usd"] > 0
 
 
 def test_readiness_reports_provider_configuration(client, monkeypatch):
