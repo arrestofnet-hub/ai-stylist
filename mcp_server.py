@@ -46,7 +46,8 @@ server = MCPServer(
     description="Personal virtual stylist for clothing and haircut try-ons.",
     version="0.5.0",
     instructions=(
-        "Use create_style_profile first when a user has no profile. "
+        "When authentication is enabled, use get_my_style_profile first. "
+        "Use create_style_profile only when the user has no profile. "
         "Then use add_reference_photos for the user's real photos. "
         "Never generate a try-on before at least one reference photo exists. "
         "Use try_outfit for clothing, try_haircut for hair only, create_full_look "
