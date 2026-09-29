@@ -1,6 +1,6 @@
-from pathlib import Path
 import ipaddress
 import socket
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
@@ -27,13 +27,13 @@ from app.schemas import (
     ReferencePhotoRole,
     StylePreferences,
 )
-from app.services.image_utils import InvalidImageError, sanitize_image_bytes
 from app.services.image_service import (
     StylistError,
     generate_style_image,
     get_generation,
     list_generations,
 )
+from app.services.image_utils import InvalidImageError, sanitize_image_bytes
 
 server = MCPServer(
     "AI Stylist",
@@ -65,7 +65,7 @@ def _validate_public_https_url(url: str) -> None:
         raise ValueError("File download URL must use public HTTPS")
 
     host = parsed.hostname.lower()
-    if host in {"localhost"} or host.endswith(".localhost") or host.endswith(".local"):
+    if host in {"localhost"} or host.endswith((".localhost", ".local")):
         raise ValueError("Private file download hosts are not allowed")
 
     try:
