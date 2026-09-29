@@ -10,13 +10,23 @@ from app.routes.admin import router as admin_router
 from app.routes.generations import router as generations_router
 from app.routes.profiles import router as profiles_router
 from app.services.image_service import recover_stale_generations
+from mcp_server import server as mcp_server
+
+
+mcp_http_app = mcp_server.streamable_http_app(
+    streamable_http_path="/mcp",
+    json_response=True,
+    stateless_http=True,
+    host=settings.host,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
     recover_stale_generations()
-    yield
+    async with mcp_server.session_manager.run():
+        yield
 
 
 app = FastAPI(
@@ -147,3 +157,9 @@ def readiness():
         return payload
 
     return JSONResponse(status_code=503, content=payload)
+
+
+# Keep MCP on the same public process/port as the REST and policy routes.
+# This mount is last so FastAPI's explicit routes win; unmatched /mcp requests
+# are then handled by the MCP Streamable HTTP app.
+app.mount("/", mcp_http_app)
