@@ -1,3 +1,4 @@
+import sqlite3
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -51,7 +52,7 @@ def readiness():
         with connection() as conn:
             conn.execute("SELECT 1").fetchone()
         database_ready = True
-    except Exception:
+    except sqlite3.Error:
         database_ready = False
 
     provider_ready = bool(settings.openai_api_key)
