@@ -15,6 +15,7 @@ from app.schemas import (
     GenerationTier,
     ProfileCreate,
     ProfileUpdate,
+    ReferencePhotoRole,
     StylePreferences,
 )
 from app.services.image_utils import InvalidImageError, sanitize_image_bytes
@@ -107,6 +108,7 @@ def _photo_count(profile_id: str) -> int:
 async def _download_openai_file(
     profile_id: str,
     file: OpenAIFile,
+    role: ReferencePhotoRole = ReferencePhotoRole.other,
 ) -> dict:
     parsed = urlparse(file.download_url)
     if parsed.scheme != "https":
@@ -172,9 +174,9 @@ async def _download_openai_file(
             conn.execute(
                 """
                 INSERT INTO reference_photos (
-                    id, profile_id, file_path, original_name, mime_type, created_at
+                    id, profile_id, file_path, original_name, mime_type, role, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     photo_id,
@@ -182,6 +184,7 @@ async def _download_openai_file(
                     str(destination),
                     file.file_name,
                     stored_type,
+                    role.value,
                     now,
                 ),
             )
@@ -195,6 +198,7 @@ async def _download_openai_file(
         "file_id": file.file_id,
         "file_name": file.file_name,
         "mime_type": stored_type,
+        "role": role.value,
         "created_at": now,
     }
 
@@ -237,6 +241,7 @@ def create_style_profile(
 async def add_reference_photos(
     profile_id: str,
     files: list[OpenAIFile],
+    roles: list[ReferencePhotoRole] | None = None,
 ) -> list[dict]:
     """Attach 1-5 user-selected reference photos to an AI Stylist profile."""
     _ensure_profile_exists(profile_id)
@@ -254,9 +259,14 @@ async def add_reference_photos(
             f"This profile can accept only {remaining} more reference photos"
         )
 
+    if roles is not None and len(roles) != len(files):
+        raise ValueError("roles must have the same number of items as files")
+
+    effective_roles = roles or [ReferencePhotoRole.other] * len(files)
+
     saved: list[dict] = []
-    for file in files:
-        saved.append(await _download_openai_file(profile_id, file))
+    for file, role in zip(files, effective_roles):
+        saved.append(await _download_openai_file(profile_id, file, role))
     return saved
 
 
