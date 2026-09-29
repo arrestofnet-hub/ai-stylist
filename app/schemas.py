@@ -1,3 +1,5 @@
+from enum import Enum
+
 from pydantic import BaseModel, Field
 
 
@@ -51,3 +53,45 @@ class PhotoOut(BaseModel):
     original_name: str | None
     mime_type: str
     created_at: str
+
+
+class GenerationMode(str, Enum):
+    outfit = "outfit"
+    haircut = "haircut"
+    change_item = "change_item"
+    full_look = "full_look"
+
+
+class GenerationTier(str, Enum):
+    preview = "preview"
+    final = "final"
+
+
+class GenerationRequest(BaseModel):
+    mode: GenerationMode
+    instruction: str = Field(min_length=2, max_length=4000)
+    tier: GenerationTier = GenerationTier.preview
+    base_generation_id: str | None = None
+    reference_photo_ids: list[str] | None = None
+
+
+class GenerationOut(BaseModel):
+    id: str
+    profile_id: str
+    mode: GenerationMode
+    tier: GenerationTier
+    status: str
+    model: str
+    quality: str
+    size: str
+    cost_credits: int
+    charged_free: int
+    charged_paid: int
+    image_url: str | None = None
+    error_message: str | None = None
+    created_at: str
+    completed_at: str | None = None
+
+
+class GenerationListOut(BaseModel):
+    items: list[GenerationOut]
