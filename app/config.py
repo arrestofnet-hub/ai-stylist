@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     stale_generation_minutes: int = 30
     generated_retention_days: int = 30
 
+    image_text_input_usd_per_million: float = 5.0
+    image_input_usd_per_million: float = 8.0
+    image_output_usd_per_million: float = 30.0
+    usd_kzt_rate: float = 0.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
