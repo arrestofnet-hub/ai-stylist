@@ -346,7 +346,7 @@ def feedback_stats(
         except json.JSONDecodeError:
             issues = []
 
-        for issue in set(str(value) for value in issues):
+        for issue in {str(value) for value in issues}:
             if issue in counts:
                 counts[issue] += 1
 
