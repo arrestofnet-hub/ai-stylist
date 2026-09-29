@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     final_credit_cost: int = 4
     stale_generation_minutes: int = 30
     generated_retention_days: int = 30
+    max_processing_generations_per_profile: int = 1
 
     image_text_input_usd_per_million: float = 5.0
     image_input_usd_per_million: float = 8.0
