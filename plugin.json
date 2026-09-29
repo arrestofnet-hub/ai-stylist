@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ai-stylist",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Personal AI stylist and virtual try-on for clothing and haircuts using the user's own reference photos.",
   "author": {
     "name": "arrestofnet-hub"
@@ -13,5 +13,26 @@
     "fashion",
     "haircut",
     "image-editing"
-  ]
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "AI Стилист",
+        "shortDescription": "Примерка и подбор образов",
+        "longDescription": "Персональный AI-стилист: использует выбранные пользователем референсные фото, примеряет одежду и прически, собирает полный образ, меняет отдельные элементы и сохраняет предпочтения, сохраняя узнаваемость человека.",
+        "developerName": "arrestofnet-hub",
+        "category": "Lifestyle",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Примерь на мне строгий осенний образ, сохрани лицо и пропорции.",
+          "Покажи, как на мне будет выглядеть эта прическа, не меняя лицо.",
+          "Собери полный образ на осень и сначала сделай preview.",
+          "Измени в последнем образе только куртку, остальное оставь без изменений."
+        ]
+      }
+    }
+  }
 }
