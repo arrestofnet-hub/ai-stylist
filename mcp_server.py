@@ -1,5 +1,7 @@
 from pathlib import Path
-from urllib.parse import urlparse
+import ipaddress
+import socket
+from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
 import httpx
@@ -47,6 +49,37 @@ server = MCPServer(
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 MAX_REFERENCE_PHOTOS = 5
+MAX_DOWNLOAD_REDIRECTS = 4
+
+
+def _validate_public_https_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("File download URL must use public HTTPS")
+
+    host = parsed.hostname.lower()
+    if host in {"localhost"} or host.endswith(".localhost") or host.endswith(".local"):
+        raise ValueError("Private file download hosts are not allowed")
+
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Could not resolve file download host") from exc
+
+    if not addresses:
+        raise ValueError("Could not resolve file download host")
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("Private or unsafe file download address is not allowed")
 
 
 class OpenAIFile(BaseModel):
@@ -111,9 +144,7 @@ async def _download_openai_file(
     file: OpenAIFile,
     role: ReferencePhotoRole = ReferencePhotoRole.other,
 ) -> dict:
-    parsed = urlparse(file.download_url)
-    if parsed.scheme != "https":
-        raise ValueError("File download URL must use HTTPS")
+    _validate_public_https_url(file.download_url)
 
     mime_type = (file.mime_type or "").lower()
     if mime_type and mime_type not in ALLOWED_IMAGE_TYPES:
@@ -126,33 +157,48 @@ async def _download_openai_file(
 
     timeout = httpx.Timeout(60.0, connect=15.0)
     raw = bytearray()
+    current_url = file.download_url
+    effective_type = mime_type
 
     async with httpx.AsyncClient(
-        follow_redirects=True,
+        follow_redirects=False,
         timeout=timeout,
         headers={"User-Agent": "AI-Stylist/0.5"},
     ) as client:
-        async with client.stream("GET", file.download_url) as response:
-            response.raise_for_status()
+        for _ in range(MAX_DOWNLOAD_REDIRECTS + 1):
+            _validate_public_https_url(current_url)
 
-            response_type = (
-                response.headers.get("content-type", "")
-                .split(";", 1)[0]
-                .strip()
-                .lower()
-            )
-            effective_type = mime_type or response_type
-            if effective_type not in ALLOWED_IMAGE_TYPES:
-                raise ValueError(
-                    "Downloaded file is not a supported JPEG, PNG or WEBP image"
+            async with client.stream("GET", current_url) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise ValueError("File download redirect has no location")
+                    current_url = urljoin(current_url, location)
+                    continue
+
+                response.raise_for_status()
+
+                response_type = (
+                    response.headers.get("content-type", "")
+                    .split(";", 1)[0]
+                    .strip()
+                    .lower()
                 )
-
-            async for chunk in response.aiter_bytes(1024 * 1024):
-                raw.extend(chunk)
-                if len(raw) > MAX_UPLOAD_BYTES:
+                effective_type = mime_type or response_type
+                if effective_type not in ALLOWED_IMAGE_TYPES:
                     raise ValueError(
-                        "Reference photo is too large (max 15 MB)"
+                        "Downloaded file is not a supported JPEG, PNG or WEBP image"
                     )
+
+                async for chunk in response.aiter_bytes(1024 * 1024):
+                    raw.extend(chunk)
+                    if len(raw) > MAX_UPLOAD_BYTES:
+                        raise ValueError(
+                            "Reference photo is too large (max 15 MB)"
+                        )
+                break
+        else:
+            raise ValueError("Too many redirects while downloading reference photo")
 
     try:
         sanitized, stored_type = sanitize_image_bytes(
