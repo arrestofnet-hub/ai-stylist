@@ -11,6 +11,7 @@ from app.schemas import (
     AdminStatsOut,
     CreditGrantRequest,
     CreditTransactionOut,
+    FeedbackStatsOut,
     MaintenanceOut,
     UsageModelStats,
     UsageStatsOut,
@@ -307,3 +308,51 @@ def usage_stats(
         )
 
     return UsageStatsOut(items=items)
+
+
+@router.get("/feedback", response_model=FeedbackStatsOut)
+def feedback_stats(
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+) -> FeedbackStatsOut:
+    _require_admin_key(x_admin_key)
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT verdict, issues_json
+            FROM generation_feedback
+            """
+        ).fetchall()
+
+    counts = {
+        "face_changed": 0,
+        "body_changed": 0,
+        "wrong_item": 0,
+        "unrealistic": 0,
+        "style_mismatch": 0,
+        "other": 0,
+    }
+    good = 0
+    bad = 0
+
+    for row in rows:
+        if row["verdict"] == "good":
+            good += 1
+        elif row["verdict"] == "bad":
+            bad += 1
+
+        try:
+            issues = json.loads(row["issues_json"] or "[]")
+        except json.JSONDecodeError:
+            issues = []
+
+        for issue in set(str(value) for value in issues):
+            if issue in counts:
+                counts[issue] += 1
+
+    return FeedbackStatsOut(
+        total=len(rows),
+        good=good,
+        bad=bad,
+        **counts,
+    )
