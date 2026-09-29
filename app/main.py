@@ -7,17 +7,19 @@ from app.db import init_db
 from app.routes.admin import router as admin_router
 from app.routes.generations import router as generations_router
 from app.routes.profiles import router as profiles_router
+from app.services.image_service import recover_stale_generations
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    recover_stale_generations()
     yield
 
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.4.0",
+    version="0.5.0",
     description="AI Stylist backend and virtual try-on API",
     lifespan=lifespan,
 )
@@ -32,7 +34,7 @@ def root() -> dict[str, str]:
     return {
         "service": settings.app_name,
         "status": "ok",
-        "version": "0.4.0",
+        "version": "0.5.0",
     }
 
 
