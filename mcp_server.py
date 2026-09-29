@@ -16,9 +16,12 @@ from app.config import settings
 from app.db import connection, utc_now
 from app.routes.profiles import (
     create_profile_record,
+    delete_profile as delete_profile_api,
+    delete_reference_photo as delete_reference_photo_api,
     get_balance,
     get_profile,
     get_profile_readiness,
+    list_reference_photos as list_reference_photos_api,
     update_profile,
 )
 from app.schemas import (
@@ -136,6 +139,23 @@ def _ensure_profile_access(profile_id: str) -> None:
         if not subject or row["owner_subject"] != subject:
             # Do not reveal whether another user's profile exists.
             raise ValueError("Profile not found")
+
+
+def _profile_for_current_subject() -> str | None:
+    if not settings.mcp_auth_enabled:
+        return None
+
+    subject = current_subject()
+    if not subject:
+        return None
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM profiles WHERE owner_subject = ?",
+            (subject,),
+        ).fetchone()
+
+    return str(row["id"]) if row is not None else None
 
 
 def _photo_count(profile_id: str) -> int:
@@ -374,6 +394,84 @@ def get_style_profile(profile_id: str) -> dict:
     """Get a saved AI Stylist profile and its current reference-photo count."""
     _ensure_profile_access(profile_id)
     return get_profile(profile_id).model_dump(mode="json")
+
+
+@server.tool(
+    title="Get my style profile",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
+def get_my_style_profile() -> dict:
+    """Return the authenticated user's style profile without requiring a profile ID."""
+    if not settings.mcp_auth_enabled:
+        return {
+            "authenticated": False,
+            "profile": None,
+            "message": "OAuth is disabled; use get_style_profile with profile_id.",
+        }
+
+    profile_id = _profile_for_current_subject()
+    if profile_id is None:
+        return {
+            "authenticated": True,
+            "profile": None,
+            "message": "No style profile exists yet.",
+        }
+
+    return {
+        "authenticated": True,
+        "profile": get_profile(profile_id).model_dump(mode="json"),
+    }
+
+
+@server.tool(
+    title="List reference photos",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
+def list_style_reference_photos(profile_id: str) -> list[dict]:
+    """List saved reference photos and their viewpoint roles."""
+    _ensure_profile_access(profile_id)
+    return [
+        item.model_dump(mode="json")
+        for item in list_reference_photos_api(profile_id)
+    ]
+
+
+@server.tool(
+    title="Remove reference photo",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+)
+def remove_style_reference_photo(profile_id: str, photo_id: str) -> dict:
+    """Permanently remove one saved reference photo."""
+    _ensure_profile_access(profile_id)
+    delete_reference_photo_api(profile_id, photo_id)
+    return {"deleted": True, "photo_id": photo_id}
+
+
+@server.tool(
+    title="Delete style profile",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+)
+def delete_style_profile(profile_id: str) -> dict:
+    """Permanently delete the style profile, its photos, generated images, and history."""
+    _ensure_profile_access(profile_id)
+    delete_profile_api(profile_id)
+    return {"deleted": True, "profile_id": profile_id}
 
 
 @server.tool(
