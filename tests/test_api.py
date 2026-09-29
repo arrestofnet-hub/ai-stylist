@@ -379,3 +379,97 @@ def test_admin_stats(client, monkeypatch):
     assert data["profiles"] >= 1
     assert data["paid_credits_granted"] >= 7
     assert data["paid_credits_remaining"] >= 7
+
+
+def test_reference_photo_role_is_stored(client):
+    profile_id = create_profile(client)
+
+    response = client.post(
+        f"/api/v1/profiles/{profile_id}/photos",
+        data={"role": "front"},
+        files={"photo": ("front.jpg", make_image_bytes(), "image/jpeg")},
+    )
+    assert response.status_code == 201
+    assert response.json()["role"] == "front"
+
+    listed = client.get(f"/api/v1/profiles/{profile_id}/photos")
+    assert listed.status_code == 200
+    assert listed.json()[0]["role"] == "front"
+
+
+def test_admin_usage_stats(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "secret-test-key")
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    monkeypatch.setattr(
+        image_service,
+        "_call_openai",
+        lambda *args, **kwargs: (
+            b"fake-webp-image",
+            {
+                "input_tokens": 120,
+                "input_tokens_details": {
+                    "image_tokens": 100,
+                    "text_tokens": 20,
+                },
+                "output_tokens": 300,
+                "output_tokens_details": {
+                    "image_tokens": 300,
+                    "text_tokens": 0,
+                },
+                "total_tokens": 420,
+            },
+        ),
+    )
+
+    generated = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json={
+            "mode": "outfit",
+            "instruction": "Navy suit",
+            "tier": "preview",
+        },
+    )
+    assert generated.status_code == 201
+    assert generated.json()["duration_ms"] is not None
+
+    usage = client.get(
+        "/api/v1/admin/usage",
+        headers={"X-Admin-Key": "secret-test-key"},
+    )
+    assert usage.status_code == 200
+    items = usage.json()["items"]
+    assert items
+    preview = next(item for item in items if item["tier"] == "preview")
+    assert preview["input_tokens"] >= 120
+    assert preview["input_image_tokens"] >= 100
+    assert preview["output_tokens"] >= 300
+    assert preview["total_tokens"] >= 420
+
+
+def test_readiness_reports_provider_configuration(client, monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    not_ready = client.get("/ready")
+    assert not_ready.status_code == 503
+    assert not_ready.json()["database"] == "ready"
+    assert not_ready.json()["image_provider"] == "not_configured"
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+
+
+def test_mcp_tools_have_safety_annotations():
+    import asyncio
+    import mcp_server
+
+    tools = asyncio.run(mcp_server.server.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+
+    assert by_name["get_style_profile"].annotations.read_only_hint is True
+    assert by_name["get_style_balance"].annotations.read_only_hint is True
+    assert by_name["try_outfit"].annotations.read_only_hint is False
+    assert by_name["try_outfit"].annotations.destructive_hint is False
+    assert by_name["update_style_preferences"].annotations.idempotent_hint is True
