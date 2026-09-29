@@ -3,3 +3,5 @@ uvicorn[standard]
 pydantic-settings
 python-multipart
 httpx
+openai
+mcp==1.26.0
