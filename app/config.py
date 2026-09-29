@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     host: str = "0.0.0.0"
     port: int = 8010
+    mcp_port: int = 8011
+    public_base_url: str = "http://localhost:8010"
 
     database_path: str = "data/ai_stylist.db"
     upload_dir: str = "uploads"
