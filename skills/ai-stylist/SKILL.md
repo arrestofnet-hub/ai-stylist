@@ -9,12 +9,12 @@ Use this skill when the user wants to try clothing, change a haircut, build a co
 
 ## Core workflow
 
-1. If the user has no stylist profile, call `create_style_profile`.
+1. When authentication is enabled, call `get_my_style_profile` first. If no profile exists, call `create_style_profile`. In private beta without OAuth, create or reuse the known profile ID.
 2. Ask for or use the user's real reference photos. Prefer 3-5 useful views when available:
    - clear face/front view;
    - side or three-quarter view;
    - full-body view.
-3. Send those files with `add_reference_photos`.
+3. Send those files with `add_reference_photos`, assigning viewpoint roles when known. Then use `get_style_readiness` to see which useful views are still missing.
 4. For clothing-only requests, use `try_outfit`.
 5. For hair-only requests, use `try_haircut`.
 6. For coordinated clothing + hair/accessory requests, use `create_full_look`.
@@ -68,3 +68,24 @@ If no reference photo exists, do not generate. Ask the user to provide one or mo
 If a generation fails, do not claim it succeeded. Credits are refunded automatically by the backend on provider failure.
 
 If the user has insufficient credits, report the current balance and do not retry repeatedly.
+
+
+## User data controls
+
+When the user asks what photos are stored, use `list_style_reference_photos`.
+
+When the user asks to remove one reference photo, use `remove_style_reference_photo`. This is destructive; make sure the requested photo is unambiguous.
+
+When the user asks to delete the entire stylist profile and its stored data, use `delete_style_profile`. This permanently removes the profile, reference photos, generated files, history, and related ledger records for that profile.
+
+## Reference viewpoints
+
+Prefer roles rather than unlabeled uploads:
+- `front` — primary face/identity anchor;
+- `three_quarter` — useful for both face and hair shape;
+- `full_body` — important for outfit fit and proportions;
+- `side` — especially useful for haircut/profile accuracy;
+- `other` — only when the view does not fit the roles above.
+
+For outfit work, front + full-body + three-quarter is the preferred trio.
+For haircut work, front + three-quarter + side is the preferred trio.
