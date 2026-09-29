@@ -61,9 +61,22 @@ def _profile(profile_id: str) -> dict:
     return data
 
 
+def _reference_role_priority(mode: GenerationMode) -> dict[str, int]:
+    if mode == GenerationMode.haircut:
+        order = ["front", "three_quarter", "side", "full_body", "other"]
+    elif mode == GenerationMode.outfit:
+        order = ["front", "full_body", "three_quarter", "side", "other"]
+    elif mode == GenerationMode.full_look:
+        order = ["front", "full_body", "three_quarter", "side", "other"]
+    else:
+        order = ["front", "three_quarter", "full_body", "side", "other"]
+    return {role: index for index, role in enumerate(order)}
+
+
 def _reference_paths(
     profile_id: str,
     requested_ids: list[str] | None,
+    mode: GenerationMode,
 ) -> list[Path]:
     with connection() as conn:
         if requested_ids:
@@ -72,15 +85,6 @@ def _reference_paths(
                 f"""
                 SELECT * FROM reference_photos
                 WHERE profile_id = ? AND id IN ({placeholders})
-                ORDER BY
-                    CASE role
-                        WHEN 'front' THEN 0
-                        WHEN 'three_quarter' THEN 1
-                        WHEN 'full_body' THEN 2
-                        WHEN 'side' THEN 3
-                        ELSE 4
-                    END,
-                    created_at ASC
                 """,
                 [profile_id, *requested_ids],
             ).fetchall()
@@ -94,24 +98,22 @@ def _reference_paths(
                 """
                 SELECT * FROM reference_photos
                 WHERE profile_id = ?
-                ORDER BY
-                    CASE role
-                        WHEN 'front' THEN 0
-                        WHEN 'three_quarter' THEN 1
-                        WHEN 'full_body' THEN 2
-                        WHEN 'side' THEN 3
-                        ELSE 4
-                    END,
-                    created_at ASC
-                LIMIT ?
                 """,
-                (profile_id, settings.max_reference_images),
+                (profile_id,),
             ).fetchall()
+
+    priority = _reference_role_priority(mode)
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            priority.get(str(row["role"]), 99),
+            str(row["created_at"]),
+        ),
+    )
 
     paths = [Path(row["file_path"]) for row in rows]
     paths = [path for path in paths if path.exists()]
     return paths[: settings.max_reference_images]
-
 
 def _base_generation_path(profile_id: str, generation_id: str) -> Path:
     with connection() as conn:
@@ -521,7 +523,7 @@ def generate_style_image(
             "change_item requires base_generation_id"
         )
 
-    reference_paths = _reference_paths(profile_id, reference_photo_ids)
+    reference_paths = _reference_paths(profile_id, reference_photo_ids, mode)
 
     if mode == GenerationMode.change_item:
         base_path = _base_generation_path(profile_id, base_generation_id or "")
