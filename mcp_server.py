@@ -5,6 +5,7 @@ from uuid import uuid4
 import httpx
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Image
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 
 from app.config import settings
@@ -203,7 +204,15 @@ async def _download_openai_file(
     }
 
 
-@server.tool()
+@server.tool(
+    title="Create style profile",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+)
 def create_style_profile(
     display_name: str | None = None,
     age_range: str | None = None,
@@ -236,7 +245,18 @@ def create_style_profile(
 
 
 @server.tool(
-    meta={"openai/fileParams": ["files"]},
+    title="Add reference photos",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    meta={
+        "openai/fileParams": ["files"],
+        "openai/toolInvocation/invoking": "Adding reference photos…",
+        "openai/toolInvocation/invoked": "Reference photos added",
+    },
 )
 async def add_reference_photos(
     profile_id: str,
@@ -270,19 +290,39 @@ async def add_reference_photos(
     return saved
 
 
-@server.tool()
+@server.tool(
+    title="Get style profile",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
 def get_style_profile(profile_id: str) -> dict:
     """Get a saved AI Stylist profile and its current reference-photo count."""
     return get_profile(profile_id).model_dump(mode="json")
 
 
-@server.tool()
+@server.tool(
+    title="Get style balance",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
 def get_style_balance(profile_id: str) -> dict:
     """Get free tries and paid-credit balance for an AI Stylist profile."""
     return get_balance(profile_id).model_dump(mode="json")
 
 
-@server.tool()
+@server.tool(
+    title="Update style preferences",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 def update_style_preferences(
     profile_id: str,
     style_goal: str | None = None,
@@ -338,7 +378,19 @@ def _run_generation(
     return _generation_payload(row)
 
 
-@server.tool()
+@server.tool(
+    title="Try an outfit",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    meta={
+        "openai/toolInvocation/invoking": "Trying the outfit…",
+        "openai/toolInvocation/invoked": "Outfit ready",
+    },
+)
 def try_outfit(
     profile_id: str,
     instruction: str,
@@ -353,7 +405,19 @@ def try_outfit(
     )
 
 
-@server.tool()
+@server.tool(
+    title="Try a haircut",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    meta={
+        "openai/toolInvocation/invoking": "Trying the haircut…",
+        "openai/toolInvocation/invoked": "Haircut ready",
+    },
+)
 def try_haircut(
     profile_id: str,
     instruction: str,
@@ -368,7 +432,19 @@ def try_haircut(
     )
 
 
-@server.tool()
+@server.tool(
+    title="Create a full look",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    meta={
+        "openai/toolInvocation/invoking": "Building the full look…",
+        "openai/toolInvocation/invoked": "Full look ready",
+    },
+)
 def create_full_look(
     profile_id: str,
     instruction: str,
@@ -383,7 +459,19 @@ def create_full_look(
     )
 
 
-@server.tool()
+@server.tool(
+    title="Change one item",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    meta={
+        "openai/toolInvocation/invoking": "Changing one item…",
+        "openai/toolInvocation/invoked": "Edit ready",
+    },
+)
 def change_one_item(
     profile_id: str,
     base_generation_id: str,
@@ -400,7 +488,13 @@ def change_one_item(
     )
 
 
-@server.tool()
+@server.tool(
+    title="Recent style generations",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
 def recent_style_generations(profile_id: str, limit: int = 10) -> list[dict]:
     """Return recent generated looks for a profile."""
     try:
@@ -410,7 +504,14 @@ def recent_style_generations(profile_id: str, limit: int = 10) -> list[dict]:
     return [_generation_payload(row) for row in rows]
 
 
-@server.tool(structured_output=False)
+@server.tool(
+    title="Get generated image",
+    structured_output=False,
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        open_world_hint=False,
+    ),
+)
 def get_generated_image(
     profile_id: str,
     generation_id: str,
