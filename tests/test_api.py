@@ -246,3 +246,27 @@ def test_mcp_server_has_workflow_instructions():
     assert mcp_server.server.instructions
     assert "add_reference_photos" in mcp_server.server.instructions
     assert "get_generated_image" in mcp_server.server.instructions
+
+
+def test_admin_credit_grant(client, monkeypatch):
+    profile_id = create_profile(client)
+    monkeypatch.setattr(settings, "admin_api_key", "secret-test-key")
+
+    unauthorized = client.post(
+        f"/api/v1/admin/profiles/{profile_id}/credits",
+        json={"amount": 10, "reason": "test"},
+    )
+    assert unauthorized.status_code == 401
+
+    granted = client.post(
+        f"/api/v1/admin/profiles/{profile_id}/credits",
+        headers={"X-Admin-Key": "secret-test-key"},
+        json={"amount": 10, "reason": "test"},
+    )
+    assert granted.status_code == 201
+    assert granted.json()["amount"] == 10
+
+    balance = client.get(f"/api/v1/profiles/{profile_id}/balance")
+    assert balance.status_code == 200
+    assert balance.json()["paid_credits"] == 10
+    assert balance.json()["total_available"] == 13
