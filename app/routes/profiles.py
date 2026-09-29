@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
 
 from app.config import settings
 from app.db import connection, decode_preferences, utc_now
@@ -13,6 +13,7 @@ from app.schemas import (
     ProfileCreate,
     ProfileOut,
     ProfileUpdate,
+    ReferencePhotoRole,
     StylePreferences,
 )
 from app.services.image_utils import InvalidImageError, sanitize_image_bytes
@@ -135,7 +136,7 @@ def list_reference_photos(profile_id: str) -> list[PhotoOut]:
     with connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, profile_id, original_name, mime_type, created_at
+            SELECT id, profile_id, original_name, mime_type, role, created_at
             FROM reference_photos
             WHERE profile_id = ?
             ORDER BY created_at ASC
@@ -153,6 +154,7 @@ def list_reference_photos(profile_id: str) -> list[PhotoOut]:
 def upload_reference_photo(
     profile_id: str,
     photo: UploadFile = File(...),
+    role: ReferencePhotoRole = Form(default=ReferencePhotoRole.other),
 ) -> PhotoOut:
     _profile_or_404(profile_id)
 
@@ -207,9 +209,9 @@ def upload_reference_photo(
             conn.execute(
                 """
                 INSERT INTO reference_photos (
-                    id, profile_id, file_path, original_name, mime_type, created_at
+                    id, profile_id, file_path, original_name, mime_type, role, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     photo_id,
@@ -217,6 +219,7 @@ def upload_reference_photo(
                     str(destination),
                     photo.filename,
                     mime_type,
+                    role.value,
                     now,
                 ),
             )
@@ -229,6 +232,7 @@ def upload_reference_photo(
         profile_id=profile_id,
         original_name=photo.filename,
         mime_type=mime_type,
+        role=role,
         created_at=now,
     )
 
