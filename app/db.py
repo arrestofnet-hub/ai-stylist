@@ -55,6 +55,16 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE reference_photos ADD COLUMN role TEXT NOT NULL DEFAULT 'other'"
         )
+    if "sha256" not in photo_columns:
+        conn.execute("ALTER TABLE reference_photos ADD COLUMN sha256 TEXT")
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_reference_photos_hash
+        ON reference_photos(profile_id, sha256)
+        WHERE sha256 IS NOT NULL
+        """
+    )
 
     conn.execute(
         """
@@ -92,6 +102,7 @@ def init_db() -> None:
                 original_name TEXT,
                 mime_type TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'other',
+                sha256 TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
