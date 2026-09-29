@@ -20,12 +20,16 @@ def _db_path() -> Path:
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(_db_path())
+    conn = sqlite3.connect(_db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -58,6 +62,36 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS generations (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                tier TEXT NOT NULL,
+                instruction TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                model TEXT NOT NULL,
+                quality TEXT NOT NULL,
+                size TEXT NOT NULL,
+                status TEXT NOT NULL,
+                output_path TEXT,
+                base_generation_id TEXT,
+                cost_credits INTEGER NOT NULL DEFAULT 1,
+                charged_free INTEGER NOT NULL DEFAULT 0,
+                charged_paid INTEGER NOT NULL DEFAULT 0,
+                usage_json TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
+                FOREIGN KEY(base_generation_id) REFERENCES generations(id) ON DELETE SET NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_photos_profile
+                ON reference_photos(profile_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_generations_profile
+                ON generations(profile_id, created_at);
             """
         )
 
