@@ -15,6 +15,7 @@ from app.schemas import (
     ProfileUpdate,
     StylePreferences,
 )
+from app.services.image_utils import InvalidImageError, sanitize_image_bytes
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -173,63 +174,61 @@ def upload_reference_photo(
             detail=f"Maximum {MAX_REFERENCE_PHOTOS} reference photos allowed",
         )
 
-    suffix = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-    }[photo.content_type]
+    raw = bytearray()
+    while True:
+        chunk = photo.file.read(1024 * 1024)
+        if not chunk:
+            break
+        raw.extend(chunk)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Reference photo is too large (max 15 MB)",
+            )
+
+    try:
+        sanitized, mime_type = sanitize_image_bytes(
+            bytes(raw),
+            output_format="WEBP",
+            quality=95,
+        )
+    except InvalidImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     photo_id = str(uuid4())
     profile_dir = Path(settings.upload_dir) / profile_id
     profile_dir.mkdir(parents=True, exist_ok=True)
-    destination = profile_dir / f"{photo_id}{suffix}"
+    destination = profile_dir / f"{photo_id}.webp"
+    destination.write_bytes(sanitized)
 
-    written = 0
+    now = utc_now()
     try:
-        with destination.open("wb") as output:
-            while True:
-                chunk = photo.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail="Reference photo is too large (max 15 MB)",
-                    )
-                output.write(chunk)
+        with connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO reference_photos (
+                    id, profile_id, file_path, original_name, mime_type, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    photo_id,
+                    profile_id,
+                    str(destination),
+                    photo.filename,
+                    mime_type,
+                    now,
+                ),
+            )
     except Exception:
         destination.unlink(missing_ok=True)
         raise
-
-    if written == 0:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="Uploaded photo is empty")
-
-    now = utc_now()
-    with connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO reference_photos (
-                id, profile_id, file_path, original_name, mime_type, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                photo_id,
-                profile_id,
-                str(destination),
-                photo.filename,
-                photo.content_type,
-                now,
-            ),
-        )
 
     return PhotoOut(
         id=photo_id,
         profile_id=profile_id,
         original_name=photo.filename,
-        mime_type=photo.content_type,
+        mime_type=mime_type,
         created_at=now,
     )
 
