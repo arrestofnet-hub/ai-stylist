@@ -1,4 +1,7 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
+from PIL import Image
 import pytest
 
 from app.config import settings
@@ -37,12 +40,19 @@ def create_profile(client: TestClient) -> str:
     return data["id"]
 
 
+def make_image_bytes() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (640, 800), "white").save(buffer, format="JPEG", quality=90)
+    return buffer.getvalue()
+
+
 def upload_reference(client: TestClient, profile_id: str) -> None:
     response = client.post(
         f"/api/v1/profiles/{profile_id}/photos",
-        files={"photo": ("reference.jpg", b"fake-image-bytes", "image/jpeg")},
+        files={"photo": ("reference.jpg", make_image_bytes(), "image/jpeg")},
     )
     assert response.status_code == 201
+    assert response.json()["mime_type"] == "image/webp"
 
 
 def test_profile_photo_generation_and_change_item(client, monkeypatch):
@@ -270,3 +280,102 @@ def test_admin_credit_grant(client, monkeypatch):
     assert balance.status_code == 200
     assert balance.json()["paid_credits"] == 10
     assert balance.json()["total_available"] == 13
+
+
+def test_invalid_reference_image_is_rejected(client):
+    profile_id = create_profile(client)
+    response = client.post(
+        f"/api/v1/profiles/{profile_id}/photos",
+        files={"photo": ("fake.jpg", b"not-an-image", "image/jpeg")},
+    )
+    assert response.status_code == 400
+
+
+def test_generation_idempotency_prevents_double_charge(client, monkeypatch):
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+
+    calls = {"count": 0}
+
+    def fake_call(*args, **kwargs):
+        calls["count"] += 1
+        return b"fake-webp-image", {"image_tokens": 50}
+
+    monkeypatch.setattr(image_service, "_call_openai", fake_call)
+
+    payload = {
+        "mode": "outfit",
+        "instruction": "Charcoal suit",
+        "tier": "preview",
+        "idempotency_key": "request-00000001",
+    }
+
+    first = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json=payload,
+    )
+    second = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json=payload,
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert calls["count"] == 1
+
+    balance = client.get(f"/api/v1/profiles/{profile_id}/balance").json()
+    assert balance["free_tries"] == 2
+
+
+def test_generated_result_can_be_deleted(client, monkeypatch):
+    profile_id = create_profile(client)
+    upload_reference(client, profile_id)
+    monkeypatch.setattr(
+        image_service,
+        "_call_openai",
+        lambda *args, **kwargs: (b"fake-webp-image", {}),
+    )
+
+    result = client.post(
+        f"/api/v1/profiles/{profile_id}/generations",
+        json={
+            "mode": "outfit",
+            "instruction": "Navy suit",
+            "tier": "preview",
+        },
+    )
+    assert result.status_code == 201
+    generation_id = result.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/profiles/{profile_id}/generations/{generation_id}"
+    )
+    assert deleted.status_code == 204
+
+    missing = client.get(
+        f"/api/v1/profiles/{profile_id}/generations/{generation_id}"
+    )
+    assert missing.status_code == 422
+
+
+def test_admin_stats(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "secret-test-key")
+    profile_id = create_profile(client)
+
+    grant = client.post(
+        f"/api/v1/admin/profiles/{profile_id}/credits",
+        headers={"X-Admin-Key": "secret-test-key"},
+        json={"amount": 7, "reason": "stats test"},
+    )
+    assert grant.status_code == 201
+
+    stats = client.get(
+        "/api/v1/admin/stats",
+        headers={"X-Admin-Key": "secret-test-key"},
+    )
+    assert stats.status_code == 200
+    data = stats.json()
+    assert data["profiles"] >= 1
+    assert data["paid_credits_granted"] >= 7
+    assert data["paid_credits_remaining"] >= 7
