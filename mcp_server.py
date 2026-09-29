@@ -383,6 +383,7 @@ async def add_reference_photos(
     title="Get style profile",
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
@@ -396,6 +397,7 @@ def get_style_profile(profile_id: str) -> dict:
     title="Get my style profile",
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
@@ -426,6 +428,7 @@ def get_my_style_profile() -> dict:
     title="List reference photos",
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
@@ -474,6 +477,7 @@ def delete_style_profile(profile_id: str) -> dict:
     title="Check reference readiness",
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
@@ -487,6 +491,7 @@ def get_style_readiness(profile_id: str) -> dict:
     title="Get style balance",
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
@@ -707,6 +712,7 @@ def rate_style_result(
     title="Recent style generations",
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
@@ -726,6 +732,7 @@ def recent_style_generations(profile_id: str, limit: int = 10) -> list[dict]:
     structured_output=False,
     annotations=ToolAnnotations(
         read_only_hint=True,
+        destructive_hint=False,
         open_world_hint=False,
     ),
 )
