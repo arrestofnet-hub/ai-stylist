@@ -1,3 +1,4 @@
+import hashlib
 import ipaddress
 import socket
 from pathlib import Path
@@ -217,6 +218,19 @@ async def _download_openai_file(
     except InvalidImageError as exc:
         raise ValueError(str(exc)) from exc
 
+    content_hash = hashlib.sha256(sanitized).hexdigest()
+
+    with connection() as conn:
+        duplicate = conn.execute(
+            """
+            SELECT id FROM reference_photos
+            WHERE profile_id = ? AND sha256 = ?
+            """,
+            (profile_id, content_hash),
+        ).fetchone()
+    if duplicate is not None:
+        raise ValueError("This reference photo is already saved")
+
     photo_id = str(uuid4())
     profile_dir = Path(settings.upload_dir) / profile_id
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -229,9 +243,10 @@ async def _download_openai_file(
             conn.execute(
                 """
                 INSERT INTO reference_photos (
-                    id, profile_id, file_path, original_name, mime_type, role, created_at
+                    id, profile_id, file_path, original_name, mime_type,
+                    role, sha256, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     photo_id,
@@ -240,6 +255,7 @@ async def _download_openai_file(
                     file.file_name,
                     stored_type,
                     role.value,
+                    content_hash,
                     now,
                 ),
             )
