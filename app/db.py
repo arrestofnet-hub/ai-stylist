@@ -34,6 +34,25 @@ def connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    generation_columns = _column_names(conn, "generations")
+    if "idempotency_key" not in generation_columns:
+        conn.execute("ALTER TABLE generations ADD COLUMN idempotency_key TEXT")
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_generations_idempotency
+        ON generations(profile_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+        """
+    )
+
+
 def init_db() -> None:
     with connection() as conn:
         conn.executescript(
@@ -76,6 +95,7 @@ def init_db() -> None:
                 status TEXT NOT NULL,
                 output_path TEXT,
                 base_generation_id TEXT,
+                idempotency_key TEXT,
                 cost_credits INTEGER NOT NULL DEFAULT 1,
                 charged_free INTEGER NOT NULL DEFAULT 0,
                 charged_paid INTEGER NOT NULL DEFAULT 0,
@@ -86,9 +106,6 @@ def init_db() -> None:
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
                 FOREIGN KEY(base_generation_id) REFERENCES generations(id) ON DELETE SET NULL
             );
-
-            CREATE INDEX IF NOT EXISTS idx_reference_photos_profile
-                ON reference_photos(profile_id, created_at);
 
             CREATE TABLE IF NOT EXISTS credit_transactions (
                 id TEXT PRIMARY KEY,
@@ -101,6 +118,9 @@ def init_db() -> None:
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
 
+            CREATE INDEX IF NOT EXISTS idx_reference_photos_profile
+                ON reference_photos(profile_id, created_at);
+
             CREATE INDEX IF NOT EXISTS idx_generations_profile
                 ON generations(profile_id, created_at);
 
@@ -108,6 +128,7 @@ def init_db() -> None:
                 ON credit_transactions(profile_id, created_at);
             """
         )
+        _apply_migrations(conn)
 
 
 def decode_preferences(raw: str | None) -> dict:
