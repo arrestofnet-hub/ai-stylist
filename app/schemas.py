@@ -172,3 +172,34 @@ class ProfileReadinessOut(BaseModel):
     outfit_ready: bool
     haircut_ready: bool
     missing_recommended_roles: list[ReferencePhotoRole]
+
+
+class FeedbackVerdict(str, Enum):
+    good = "good"
+    bad = "bad"
+
+
+class FeedbackIssue(str, Enum):
+    face_changed = "face_changed"
+    body_changed = "body_changed"
+    wrong_item = "wrong_item"
+    unrealistic = "unrealistic"
+    style_mismatch = "style_mismatch"
+    other = "other"
+
+
+class GenerationFeedbackRequest(BaseModel):
+    verdict: FeedbackVerdict
+    issues: list[FeedbackIssue] = Field(default_factory=list)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class GenerationFeedbackOut(BaseModel):
+    id: str
+    generation_id: str
+    profile_id: str
+    verdict: FeedbackVerdict
+    issues: list[FeedbackIssue]
+    note: str | None = None
+    created_at: str
+    updated_at: str
